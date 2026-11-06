@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101827"><title>Pilots Challenge</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<header class="top"><div class="brand">✈ PILOTS <span>CHALLENGE</span></div><div id="who" class="who"></div></header>
+<main>
+  <section id="setup" class="panel narrow">
+    <p class="eyebrow">BIENVENIDO/A A LA COMPETENCIA</p><h1>Entra al desafío</h1>
+    <p class="muted">Usa un pseudónimo. No necesitas instalar nada.</p>
+    <label>Pseudónimo<input id="nickname" maxlength="24" placeholder="Ej. Capitán Maverick"></label>
+    <label>Tu cargo<select id="role"><option value="FO">FO</option><option value="CT">CT</option></select></label>
+    <button id="join">Ingresar</button><p id="setupMsg" class="msg"></p>
+  </section>
+
+  <section id="participant" hidden>
+    <div class="welcome panel"><div><p class="eyebrow">TU MISIÓN COMIENZA AHORA</p><h1 id="hello">¡A jugar!</h1><p class="muted">Elige los desafíos que quieras. Puedes volver al menú cuando quieras.</p></div><div class="score"><small>TU PUNTAJE</small><strong id="myScore">0</strong></div></div>
+    <div class="tiles">
+      <button class="tile" data-page="trivia"><b>01</b><span>Trivia por niveles</span><small>Básica · Intermedia · Experta</small></button>
+      <button class="tile" data-page="tf"><b>02</b><span>Verdadero o falso</span><small>Preguntas rápidas</small></button>
+      <button class="tile" data-page="objects"><b>03</b><span>¿Quién tiene…?</span><small>Sube una foto como evidencia</small></button>
+      <button class="tile" data-page="ranking"><b>04</b><span>Ranking en vivo</span><small>Compite con la tripulación</small></button>
+    </div>
+    <section id="game" class="panel" hidden></section>
+  </section>
+
+  <section id="adminLogin" class="panel narrow" hidden>
+    <p class="eyebrow">ACCESO RESTRINGIDO</p><h2>Panel de organización</h2>
+    <label>Correo<input id="adminEmail" type="email" autocomplete="username"></label>
+    <label>Contraseña<input id="adminPassword" type="password" autocomplete="current-password"></label>
+    <button id="adminSignIn">Entrar como organizador</button><p id="adminMsg" class="msg"></p>
+  </section>
+
+  <section id="admin" hidden>
+    <div class="panel"><p class="eyebrow">CONTROL DEL EVENTO</p><h1>Panel del organizador</h1><p class="muted">Crea y modifica preguntas, publica desafíos y revisa evidencias.</p></div>
+    <div class="adminGrid">
+      <section class="panel"><h2>Crear / editar pregunta</h2>
+        <input id="qId" type="hidden">
+        <label>Juego<select id="qGame"><option value="trivia">Trivia</option><option value="tf">Verdadero o falso</option></select></label>
+        <label>Dificultad<select id="qLevel"><option value="1">Básica</option><option value="2">Intermedia</option><option value="3">Experta</option></select></label>
+        <label>Pregunta<textarea id="qText" rows="3" placeholder="Escribe la pregunta…"></textarea></label>
+        <div id="optionFields">
+          <label>Alternativa A<input id="optA"></label><label>Alternativa B<input id="optB"></label>
+          <label>Alternativa C<input id="optC"></label><label>Alternativa D<input id="optD"></label>
+        </div>
+        <label>Respuesta correcta<select id="qCorrect"><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option></select></label>
+        <label>Puntos<input id="qPoints" type="number" min="1" value="10"></label>
+        <button id="saveQuestion">Guardar pregunta</button><button id="clearQuestion" class="secondary">Limpiar</button><p id="qMsg" class="msg"></p>
+      </section>
+      <section class="panel"><h2>Crear desafío de objeto</h2>
+        <label>Desafío<textarea id="challengeText" rows="3" placeholder="Ej. ¿Quién tiene una moneda extranjera?"></textarea></label>
+        <label>Puntos<input id="challengePoints" type="number" min="1" value="15"></label>
+        <button id="saveChallenge">Publicar desafío</button><p id="challengeMsg" class="msg"></p>
+        <h3>Preguntas existentes</h3><div id="questionList"></div>
+      </section>
+    </div>
+    <section class="panel"><h2>Evidencias pendientes</h2><div id="pending"></div></section>
+    <section class="panel"><h2>Participantes y puntajes</h2><div id="adminRanking"></div></section>
+  </section>
+</main>
+<footer><button id="adminLink" class="linkbtn">Acceso organizador</button><span> · Pilots Challenge</span></footer>
+<script src="app.js"></script>
+</body></html>
