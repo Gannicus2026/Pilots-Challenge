@@ -1,6 +1,7 @@
 // Configura estos dos valores con los datos de tu proyecto Supabase.
-const SUPABASE_URL = "PEGA_AQUI_TU_PROJECT_URL";
-const SUPABASE_ANON_KEY = "PEGA_AQUI_TU_ANON_KEY";
+
+const SUPABASE_URL = "https://biyeqyvllisutwtukrov.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_hyQE25aZ6fybAqcIxZ5fhw_xfX0hSHn";
 const configured = SUPABASE_URL.startsWith("https://") && !SUPABASE_ANON_KEY.startsWith("PEGA_");
 const db = configured ? window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY) : null;
 let user=null, participant=null, currentQuestions=[], selectedAnswer=null, currentGame=null;
