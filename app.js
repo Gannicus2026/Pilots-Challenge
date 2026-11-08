@@ -3,34 +3,139 @@
 const SUPABASE_URL = "https://biyeqyvllisutwtukrov.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_hyQE25aZ6fybAqcIxZ5fhw_xfX0hSHn";
 const configured = SUPABASE_URL.startsWith("https://") && !SUPABASE_ANON_KEY.startsWith("PEGA_");
+// Capture recovery intent before the SDK consumes and clears the URL fragment.
+const authParams = new URLSearchParams(location.hash.slice(1));
+let recovering = authParams.get("type") === "recovery" || authParams.has("error") || new URLSearchParams(location.search).get("recovery") === "1";
+let recoveryReady = false;
+const recoveryStorageKey = "pilots-password-recovery";
 const db = configured ? window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY) : null;
 let user=null, participant=null, currentQuestions=[], selectedAnswer=null, currentGame=null;
 const $=id=>document.getElementById(id);
 const show=(id)=>$(id).hidden=false, hide=(id)=>$(id).hidden=true;
 const msg=(id,s)=>$(id).textContent=s;
 function needConfig(){if(!db){alert("Falta configurar Supabase. Sigue los pasos del archivo README.");return false}return true}
-async function session(){if(!needConfig())return;let {data}=await db.auth.getSession();if(data.session){user=data.session.user;await loadParticipant()}}
+function resetScreen(){
+  ["setup","participant","adminLogin","admin","game","passwordRecovery"].forEach(hide);
+  participant=null; user=null; currentQuestions=[]; selectedAnswer=null; currentGame=null;
+  msg("who", ""); msg("myScore", "0");
+  ["questionList","pending","adminRanking","game"].forEach(id=>$(id).textContent="");
+  $("adminPassword").value="";
+}
+function cleanAuthUrl(){
+  const url=new URL(location.href); url.hash="";
+  ["recovery","code","error","error_code","error_description"].forEach(key=>url.searchParams.delete(key));
+  history.replaceState(null,"",url.pathname+url.search);
+}
+function recoveryScreen(ready){
+  recoveryReady=ready; resetScreen(); show("passwordRecovery");
+  $("savePassword").disabled=!ready;
+  msg("recoveryMsg",ready?"Ingresa y confirma tu nueva contraseña.":"El enlace no es válido o ha vencido. Solicita uno nuevo desde Acceso organizador.");
+}
+async function session(){
+  if(!needConfig())return;
+  try {
+    const {data,error}=await db.auth.getSession();
+    if(recovering || sessionStorage.getItem(recoveryStorageKey)){
+      recovering=true;
+      // The recovery event (or this tab's pending marker) must precede password entry.
+      recoveryScreen(!error && !!data.session && (recoveryReady || !!sessionStorage.getItem(recoveryStorageKey)));
+      cleanAuthUrl(); return;
+    }
+    resetScreen();
+    if(error)throw error;
+    if(!data.session){show("setup");return}
+    user=data.session.user;
+    if(user.is_anonymous){await loadParticipant();if(!participant)show("setup");return}
+    const {data:admin,error:adminError}=await db.rpc("is_admin");
+    if(adminError)throw adminError;
+    if(admin){show("admin");msg("who","Organizador");await loadAdmin()}
+    else {show("adminLogin");msg("adminMsg","Esta cuenta no tiene permisos de organizador.")}
+  } catch {show("adminLogin");msg("adminMsg","No se pudo restaurar la sesión. Intenta ingresar nuevamente.")}
+}
+async function closeSession(){
+  if(participant && !confirm("Al cerrar esta sesión anónima no podrás volver a entrar con este mismo participante. Su puntaje y registros se conservarán. ¿Cerrar sesión?"))return;
+  const {error}=await db.auth.signOut({scope:"local"});
+  if(error){alert("No se pudo cerrar la sesión. Intenta nuevamente.");return false}
+  sessionStorage.removeItem(recoveryStorageKey);recovering=false;recoveryReady=false;
+  resetScreen();show("setup");return true;
+}
+$("participantSignOut").onclick=closeSession;
+$("adminSignOut").onclick=closeSession;
+$("loginBack").onclick=()=>{hide("adminLogin");show(participant?"participant":"setup")};
+$("forgotPassword").onclick=async()=>{
+  const email=$("adminEmail");if(!email.value.trim() || !email.reportValidity()){msg("adminMsg","Ingresa un correo válido para solicitar la recuperación.");return}
+  $("forgotPassword").disabled=true;
+  try{
+    const redirect=new URL(location.pathname,location.origin);
+    const {error}=await db.auth.resetPasswordForEmail(email.value.trim(),{redirectTo:redirect.href});
+    msg("adminMsg",error?"No se pudo enviar el enlace. Espera unos minutos e intenta nuevamente.":"Si el correo tiene una cuenta, recibirás un enlace para establecer una nueva contraseña.");
+  }catch{msg("adminMsg","No se pudo conectar. Intenta nuevamente.")}
+  finally{$("forgotPassword").disabled=false}
+};
+$("newPasswordForm").onsubmit=async event=>{
+  event.preventDefault();if(!recoveryReady)return;
+  const password=$("newPassword").value;
+  if(password.length<12){msg("recoveryMsg","Usa al menos 12 caracteres.");return}
+  if(password!==$("confirmPassword").value){msg("recoveryMsg","Las contraseñas no coinciden.");return}
+  $("savePassword").disabled=true;
+  try{
+    const {data,error:sessionError}=await db.auth.getUser();
+    if(sessionError || !data.user || data.user.is_anonymous){recoveryScreen(false);return}
+    const {error}=await db.auth.updateUser({password});
+    if(error){msg("recoveryMsg",error.code==="same_password"?"Elige una contraseña diferente de la anterior.":"No se pudo actualizar. Comprueba los requisitos de contraseña o solicita un enlace nuevo.");return}
+    $("newPasswordForm").reset();
+    sessionStorage.removeItem(recoveryStorageKey);recovering=false;recoveryReady=false;cleanAuthUrl();
+    const {error:logoutError}=await db.auth.signOut({scope:"local"});
+    resetScreen();show("adminLogin");
+    msg("adminMsg",logoutError?"Contraseña actualizada. Cierra la sesión antes de compartir este dispositivo.":"Contraseña actualizada. Ya puedes ingresar como organizador.");
+  }catch{msg("recoveryMsg","No se pudo conectar. Intenta nuevamente.")}
+  finally{$("savePassword").disabled=!recoveryReady}
+};
+$("cancelRecovery").onclick=async()=>{if(await closeSession()){$("newPasswordForm").reset();cleanAuthUrl();hide("setup");show("adminLogin")}};
+if(db)db.auth.onAuthStateChange((event,session)=>{
+  // Do not await Supabase calls inside this synchronous listener (Auth lock).
+  if(event==="PASSWORD_RECOVERY"){
+    recovering=true;sessionStorage.setItem(recoveryStorageKey,"pending");
+    recoveryScreen(!!session);cleanAuthUrl();
+  }else if(event==="SIGNED_OUT"){
+    sessionStorage.removeItem(recoveryStorageKey);recovering=false;recoveryReady=false;
+    resetScreen();show("setup");
+  }
+});
 async function loadParticipant(){const {data,error}=await db.from("participants").select("*").eq("id",user.id).maybeSingle();if(data){participant=data;hide("setup");show("participant");hide("adminLogin");hide("admin");$("hello").textContent=`¡Vamos, ${data.nickname}!`; $("who").textContent=`${data.nickname} · ${data.role}`;await refreshScore()}else if(error)console.error(error)}
 async function refreshScore(){if(!participant)return;let {data}=await db.from("participants").select("points").eq("id",user.id).single();if(data){participant.points=data.points;$("myScore").textContent=data.points}}
-$("join").onclick=async()=>{if(!needConfig())return;const nickname=$("nickname").value.trim(),role=$("role").value;if(nickname.length<2){msg("setupMsg","El pseudónimo debe tener al menos 2 caracteres.");return}msg("setupMsg","Ingresando…");let {data,error}=await db.auth.signInAnonymously();if(error){msg("setupMsg",error.message);return}user=data.user;let res=await db.from("participants").insert({id:user.id,nickname,role}).select().single();if(res.error){msg("setupMsg",res.error.message);return}participant=res.data;await loadParticipant()};
+$("join").onclick=async()=>{if(!needConfig())return;const nickname=$("nickname").value.trim(),role=$("role").value;if(nickname.length<2){msg("setupMsg","El pseudónimo debe tener al menos 2 caracteres.");return}msg("setupMsg","Ingresando…");let {data,error}=user?.is_anonymous?{data:{user},error:null}:await db.auth.signInAnonymously();if(error){msg("setupMsg",error.message);return}user=data.user;let res=await db.from("participants").insert({id:user.id,nickname,role}).select().single();if(res.error){msg("setupMsg",res.error.message);return}participant=res.data;await loadParticipant()};
 document.querySelectorAll(".tile").forEach(b=>b.onclick=()=>openPage(b.dataset.page));
 async function openPage(page){const g=$("game");show("game");g.innerHTML='<p class="muted">Cargando…</p>';if(page==="ranking"){await renderRanking();return}if(page==="objects"){await renderChallenges();return}currentGame=page;let query=db.from("public_questions").select("*").eq("game",page).order("level").order("created_at");let {data,error}=await query;if(error){g.textContent=error.message;return}currentQuestions=data||[];if(page==="trivia"){g.innerHTML='<h2>Elige tu nivel</h2><p class="muted">Puedes jugar cualquiera de los niveles.</p><div class="answers"><button data-level="1">Básica</button><button data-level="2">Intermedia</button><button data-level="3">Experta</button></div><button class="secondary" id="back">Volver</button>';g.querySelectorAll("[data-level]").forEach(b=>b.onclick=()=>startQuestionSet(Number(b.dataset.level)));$("back").onclick=()=>hide("game")}else startQuestionSet(null)}
-function startQuestionSet(level){let qs=currentQuestions.filter(q=>level===null||q.level===level);if(!qs.length){$("game").innerHTML='<h2>Aún no hay preguntas</h2><p class="muted">El organizador todavía no ha publicado preguntas para esta selección.</p><button class="secondary" onclick="document.getElementById(\'game\').hidden=true">Volver</button>';return}let i=0,correct=0;const render=()=>{let q=qs[i];selectedAnswer=null;let opts=q.options||{};$("game").innerHTML=`<p class="eyebrow">${currentGame==="tf"?"VERDADERO O FALSO":"TRIVIA · "+["","BÁSICA","INTERMEDIA","EXPERTA"][q.level]}</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${Object.entries(opts).filter(([k,v])=>v).map(([k,v])=>`<button data-answer="${k}"><b>${k}.</b> ${escapeHtml(v)}</button>`).join("")}</div><p class="muted">Pregunta ${i+1} de ${qs.length}</p><button id="submitAnswer" disabled>Responder</button> <button class="secondary" id="quit">Salir</button><p id="answerMsg" class="msg"></p>`;$("game").querySelectorAll("[data-answer]").forEach(b=>b.onclick=()=>{selectedAnswer=b.dataset.answer;$("game").querySelectorAll("[data-answer]").forEach(x=>x.classList.toggle("selected",x===b));$("submitAnswer").disabled=false});$("quit").onclick=()=>hide("game");$("submitAnswer").onclick=async()=>{let {data,error}=await db.rpc("submit_answer",{p_question_id:q.id,p_answer:selectedAnswer});if(error){msg("answerMsg",error.message);return}if(data?.correct)correct++;i++;if(i<qs.length){render()}else{$("game").innerHTML=`<h2>¡Desafío terminado!</h2><p>Respuestas correctas: ${correct} de ${qs.length}.</p><p class="muted">Puntaje actualizado en el ranking.</p><button id="done">Volver al menú</button>`;$("done").onclick=()=>hide("game");await refreshScore()}}};render()}
+function startQuestionSet(level){let qs=currentQuestions.filter(q=>level===null||q.level===level);if(!qs.length){$("game").innerHTML='<h2>Aún no hay preguntas</h2><p class="muted">El organizador todavía no ha publicado preguntas para esta selección.</p><button class="secondary" onclick="document.getElementById(\'game\').hidden=true">Volver</button>';return}let i=0,correct=0;const render=()=>{let q=qs[i];selectedAnswer=null;let opts=q.options||{};$("game").innerHTML=`<p class="eyebrow">${currentGame==="tf"?"VERDADERO O FALSO":"TRIVIA · "+["","BÁSICA","INTERMEDIA","EXPERTA"][q.level]}</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${Object.entries(opts).filter(([k,v])=>v).map(([k,v])=>`<button data-answer="${escapeHtml(k)}"><b>${k}.</b> ${escapeHtml(v)}</button>`).join("")}</div><p class="muted">Pregunta ${i+1} de ${qs.length}</p><button id="submitAnswer" disabled>Responder</button> <button class="secondary" id="quit">Salir</button><p id="answerMsg" class="msg"></p>`;$("game").querySelectorAll("[data-answer]").forEach(b=>b.onclick=()=>{selectedAnswer=b.dataset.answer;$("game").querySelectorAll("[data-answer]").forEach(x=>x.classList.toggle("selected",x===b));$("submitAnswer").disabled=false});$("quit").onclick=()=>hide("game");$("submitAnswer").onclick=async()=>{let {data,error}=await db.rpc("submit_answer",{p_question_id:q.id,p_answer:selectedAnswer});if(error){msg("answerMsg",error.message);return}if(data?.correct)correct++;i++;if(i<qs.length){render()}else{$("game").innerHTML=`<h2>¡Desafío terminado!</h2><p>Respuestas correctas: ${correct} de ${qs.length}.</p><p class="muted">Puntaje actualizado en el ranking.</p><button id="done">Volver al menú</button>`;$("done").onclick=()=>hide("game");await refreshScore()}}};render()}
 async function renderChallenges(){let {data,error}=await db.from("challenges").select("*").eq("active",true).order("created_at",{ascending:false});if(error){$("game").textContent=error.message;return}let g=$("game");g.innerHTML='<h2>¿Quién tiene…?</h2><p class="muted">Sube una fotografía que demuestre que tienes el objeto. Evita incluir rostros, documentos personales o información operacional.</p>'+(data||[]).map(c=>`<div class="challenge"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos</small><label>Fotografía<input type="file" accept="image/*" id="photo-${c.id}"></label><button data-upload="${c.id}">Enviar evidencia</button><span class="msg" id="upload-${c.id}"></span></div>`).join("")+'<button class="secondary" id="backObjects">Volver</button>';g.querySelectorAll("[data-upload]").forEach(b=>b.onclick=()=>uploadEvidence(b.dataset.upload));$("backObjects").onclick=()=>hide("game")}
 async function uploadEvidence(challengeId){let f=$(`photo-${challengeId}`).files[0];if(!f){msg(`upload-${challengeId}`,"Selecciona una fotografía.");return}if(!f.type.startsWith("image/")||f.size>5*1024*1024){msg(`upload-${challengeId}`,"Usa una imagen de máximo 5 MB.");return}msg(`upload-${challengeId}`,"Subiendo…");let path=`${user.id}/${crypto.randomUUID()}-${f.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;let {error:upErr}=await db.storage.from("evidence").upload(path,f,{upsert:false});if(upErr){msg(`upload-${challengeId}`,upErr.message);return}let {error}=await db.from("submissions").insert({participant_id:user.id,challenge_id:challengeId,photo_path:path});if(error){msg(`upload-${challengeId}`,error.message);return}msg(`upload-${challengeId}`,"¡Evidencia enviada! Queda pendiente de revisión.")}
-async function renderRanking(){let {data,error}=await db.from("public_ranking").select("*").order("points",{ascending:false}).limit(100);let g=$("game");if(error){g.textContent=error.message;return}g.innerHTML='<h2>Ranking general</h2><p class="muted">Puntajes acumulados de la tripulación.</p><table><thead><tr><th>#</th><th>Pseudónimo</th><th>Cargo</th><th>Puntos</th></tr></thead><tbody>'+(data||[]).map((p,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(p.nickname)}</td><td><span class="tag">${p.role}</span></td><td><b>${p.points}</b></td></tr>`).join("")+'</tbody></table><button class="secondary" id="rankBack">Volver</button>'; $("rankBack").onclick=()=>hide("game")}
+async function renderRanking(){let {data,error}=await db.from("public_ranking").select("*").order("points",{ascending:false}).limit(100);let g=$("game");if(error){g.textContent=error.message;return}g.innerHTML='<h2>Ranking general</h2><p class="muted">Puntajes acumulados de la tripulación.</p><table><thead><tr><th>#</th><th>Pseudónimo</th><th>Cargo</th><th>Puntos</th></tr></thead><tbody>'+(data||[]).map((p,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(p.nickname)}</td><td><span class="tag">${escapeHtml(p.role)}</span></td><td><b>${p.points}</b></td></tr>`).join("")+'</tbody></table><button class="secondary" id="rankBack">Volver</button>'; $("rankBack").onclick=()=>hide("game")}
 function escapeHtml(s=""){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-$("adminLink").onclick=()=>{hide("setup");hide("participant");show("adminLogin")};
-$("adminSignIn").onclick=async()=>{if(!needConfig())return;let {data,error}=await db.auth.signInWithPassword({email:$("adminEmail").value,password:$("adminPassword").value});if(error){msg("adminMsg",error.message);return}user=data.user;let {data:admin}=await db.from("admins").select("user_id").eq("user_id",user.id).maybeSingle();if(!admin){msg("adminMsg","Esta cuenta no tiene permisos de organizador.");await db.auth.signOut();return}hide("adminLogin");show("admin");await loadAdmin()}
+$("adminLink").onclick=async()=>{if(recovering || !$("admin").hidden)return;if(participant && !await closeSession())return;hide("setup");hide("participant");hide("game");show("adminLogin")};
+$("adminSignIn").onclick=async()=>{
+  if(!needConfig())return;
+  if(participant){if(!await closeSession())return;hide("setup");show("adminLogin")}
+  $("adminSignIn").disabled=true;
+  try{
+    const {error}=await db.auth.signInWithPassword({email:$("adminEmail").value.trim(),password:$("adminPassword").value});
+    $("adminPassword").value="";
+    if(error){msg("adminMsg","No se pudo ingresar. Revisa el correo y la contraseña.");return}
+    const {data:admin,error:adminError}=await db.rpc("is_admin");
+    if(adminError || !admin){await db.auth.signOut({scope:"local"});hide("setup");show("adminLogin");msg("adminMsg","No se pudieron verificar los permisos de organizador.");return}
+    await session();
+  }catch{msg("adminMsg","No se pudo conectar. Intenta nuevamente.")}
+  finally{$("adminSignIn").disabled=false}
+};
 $("qGame").onchange=()=>{let tf=$("qGame").value==="tf";$("optionFields").hidden=tf;$("qCorrect").innerHTML=tf?'<option value="V">Verdadero</option><option value="F">Falso</option>':'<option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>';if(tf)$("qLevel").value="1"};
-$("saveQuestion").onclick=async()=>{let game=$("qGame").value,options=game==="tf"?{V:"Verdadero",F:"Falso"}:{A:$("optA").value.trim(),B:$("optB").value.trim(),C:$("optC").value.trim(),D:$("optD").value.trim()};if(!$("qText").value.trim()){msg("qMsg","Escribe la pregunta.");return}let row={game,level:Number($("qLevel").value),question:$("qText").value.trim(),options,points:Number($("qPoints").value),correct_answer:$("qCorrect").value};let query=$("qId").value?db.from("questions").update(row).eq("id",$("qId").value):db.from("questions").insert(row);let {error}=await query;if(error){msg("qMsg",error.message);return}msg("qMsg","Pregunta guardada.");clearQuestion();await loadAdmin()};
+$("saveQuestion").onclick=async()=>{let game=$("qGame").value,options=game==="tf"?{V:"Verdadero",F:"Falso"}:{A:$("optA").value.trim(),B:$("optB").value.trim(),C:$("optC").value.trim(),D:$("optD").value.trim()};if(!options[$("qCorrect").value] || (game==="trivia" && (!options.A || !options.B))){msg("qMsg","Completa al menos A y B y la alternativa correcta.");return}if(!$("qText").value.trim()){msg("qMsg","Escribe la pregunta.");return}let row={game,level:Number($("qLevel").value),question:$("qText").value.trim(),options,points:Number($("qPoints").value),correct_answer:$("qCorrect").value};let query=$("qId").value?db.from("questions").update(row).eq("id",$("qId").value):db.from("questions").insert(row);let {error}=await query;if(error){msg("qMsg",error.message);return}msg("qMsg","Pregunta guardada.");clearQuestion();await loadAdmin()};
 function clearQuestion(){["qId","qText","optA","optB","optC","optD"].forEach(id=>$(id).value="");$("qPoints").value=10}
 $("clearQuestion").onclick=clearQuestion;
 $("saveChallenge").onclick=async()=>{let description=$("challengeText").value.trim();if(!description){msg("challengeMsg","Escribe el desafío.");return}let {error}=await db.from("challenges").insert({description,points:Number($("challengePoints").value),active:true});msg("challengeMsg",error?error.message:"Desafío publicado.");if(!error){$("challengeText").value="";await loadAdmin()}}
 async function loadAdmin(){let {data:qs}=await db.from("questions").select("*").order("created_at",{ascending:false});$("questionList").innerHTML=(qs||[]).map(q=>`<div class="question"><strong>${escapeHtml(q.question)}</strong><small>${q.game==="tf"?"Verdadero/Falso":"Trivia nivel "+q.level} · ${q.points} puntos</small><button class="secondary" data-edit="${q.id}">Editar</button><button class="secondary" data-del="${q.id}">Eliminar</button></div>`).join("")||"<p class='muted'>Aún no hay preguntas.</p>";$("questionList").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editQuestion(qs.find(q=>q.id===b.dataset.edit)));$("questionList").querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>deleteQuestion(b.dataset.del));await loadPending();await loadAdminRanking()}
 function editQuestion(q){$("qId").value=q.id;$("qGame").value=q.game;$("qGame").dispatchEvent(new Event("change"));$("qLevel").value=q.level;$("qText").value=q.question;$("qPoints").value=q.points;$("qCorrect").value=q.correct_answer;if(q.game==="trivia"){["A","B","C","D"].forEach(k=>$("opt"+k).value=q.options[k]||"")}window.scrollTo({top:0,behavior:"smooth"})}
 async function deleteQuestion(id){if(!confirm("¿Eliminar esta pregunta?"))return;let {error}=await db.from("questions").delete().eq("id",id);if(error)alert(error.message);else loadAdmin()}
-async function loadPending(){let {data,error}=await db.from("admin_submissions").select("*").eq("status","pending").order("created_at");if(error){$("pending").textContent=error.message;return}let rows=await Promise.all((data||[]).map(async s=>{let signed=await db.storage.from("evidence").createSignedUrl(s.photo_path,300);return {...s,photo_url:signed.data?.signedUrl||""}}));let el=$("pending");el.innerHTML=rows.map(s=>`<div class="submission"><b>${escapeHtml(s.nickname)} (${s.role})</b><p>${escapeHtml(s.description)}</p><img class="photo" src="${s.photo_url}" alt="Evidencia enviada"><button data-approve="${s.id}">Aprobar (+${s.points})</button><button class="secondary" data-reject="${s.id}">Rechazar</button></div>`).join("")||"<p class='muted'>No hay evidencias pendientes.</p>";el.querySelectorAll("[data-approve]").forEach(b=>b.onclick=()=>review(b.dataset.approve,true));el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>review(b.dataset.reject,false))}
+async function loadPending(){let {data,error}=await db.from("admin_submissions").select("*").eq("status","pending").order("created_at");if(error){$("pending").textContent=error.message;return}let rows=await Promise.all((data||[]).map(async s=>{let signed=await db.storage.from("evidence").createSignedUrl(s.photo_path,300);return {...s,photo_url:signed.data?.signedUrl||""}}));let el=$("pending");el.innerHTML=rows.map(s=>`<div class="submission"><b>${escapeHtml(s.nickname)} (${escapeHtml(s.role)})</b><p>${escapeHtml(s.description)}</p><img class="photo" src="${escapeHtml(s.photo_url)}" alt="Evidencia enviada"><button data-approve="${s.id}">Aprobar (+${s.points})</button><button class="secondary" data-reject="${s.id}">Rechazar</button></div>`).join("")||"<p class='muted'>No hay evidencias pendientes.</p>";el.querySelectorAll("[data-approve]").forEach(b=>b.onclick=()=>review(b.dataset.approve,true));el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>review(b.dataset.reject,false))}
 async function review(id,approved){let {error}=await db.rpc("review_submission",{p_submission_id:id,p_approved:approved});if(error)alert(error.message);else{await loadPending();await loadAdminRanking()}}
-async function loadAdminRanking(){let {data}=await db.from("public_ranking").select("*").order("points",{ascending:false});$("adminRanking").innerHTML=(data||[]).map((p,i)=>`<div class="rankrow"><span>${i+1}. ${escapeHtml(p.nickname)} <span class="tag">${p.role}</span></span><b>${p.points}</b></div>`).join("")||"<p class='muted'>Sin participantes todavía.</p>"}
+async function loadAdminRanking(){let {data}=await db.from("public_ranking").select("*").order("points",{ascending:false});$("adminRanking").innerHTML=(data||[]).map((p,i)=>`<div class="rankrow"><span>${i+1}. ${escapeHtml(p.nickname)} <span class="tag">${escapeHtml(p.role)}</span></span><b>${p.points}</b></div>`).join("")||"<p class='muted'>Sin participantes todavía.</p>"}
 if(configured)session();

@@ -2,6 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#101827"><title>Pilots Challenge</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -19,6 +20,7 @@
 
   <section id="participant" hidden>
     <div class="welcome panel"><div><p class="eyebrow">TU MISIÓN COMIENZA AHORA</p><h1 id="hello">¡A jugar!</h1><p class="muted">Elige los desafíos que quieras. Puedes volver al menú cuando quieras.</p></div><div class="score"><small>TU PUNTAJE</small><strong id="myScore">0</strong></div></div>
+    <button id="participantSignOut" class="secondary">Cerrar sesión de participante</button>
     <div class="tiles">
       <button class="tile" data-page="trivia"><b>01</b><span>Trivia por niveles</span><small>Básica · Intermedia · Experta</small></button>
       <button class="tile" data-page="tf"><b>02</b><span>Verdadero o falso</span><small>Preguntas rápidas</small></button>
@@ -32,10 +34,24 @@
     <p class="eyebrow">ACCESO RESTRINGIDO</p><h2>Panel de organización</h2>
     <label>Correo<input id="adminEmail" type="email" autocomplete="username"></label>
     <label>Contraseña<input id="adminPassword" type="password" autocomplete="current-password"></label>
-    <button id="adminSignIn">Entrar como organizador</button><p id="adminMsg" class="msg"></p>
+    <button id="forgotPassword" class="secondary">Recuperar contraseña</button>
+    <button id="loginBack" class="secondary">Volver</button>
+    <button id="adminSignIn">Entrar como organizador</button><p id="adminMsg" class="msg" role="status" aria-live="polite"></p>
   </section>
 
+  <section id="passwordRecovery" class="panel narrow" hidden aria-labelledby="recoveryTitle">
+    <p class="eyebrow">RECUPERACIÓN DE CUENTA</p><h1 id="recoveryTitle">Nueva contraseña</h1>
+    <p class="muted">Usa una contraseña única de al menos 12 caracteres.</p>
+    <form id="newPasswordForm">
+      <label>Nueva contraseña<input id="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></label>
+      <label>Confirmar contraseña<input id="confirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required></label>
+      <button id="savePassword" type="submit" disabled>Guardar contraseña</button>
+    </form>
+    <p id="recoveryMsg" class="msg" role="status" aria-live="polite"></p>
+    <button id="cancelRecovery" class="secondary">Volver al acceso de organizador</button>
+  </section>
   <section id="admin" hidden>
+    <button id="adminSignOut" class="secondary">Cerrar sesión de administrador</button>
     <div class="panel"><p class="eyebrow">CONTROL DEL EVENTO</p><h1>Panel del organizador</h1><p class="muted">Crea y modifica preguntas, publica desafíos y revisa evidencias.</p></div>
     <div class="adminGrid">
       <section class="panel"><h2>Crear / editar pregunta</h2>
