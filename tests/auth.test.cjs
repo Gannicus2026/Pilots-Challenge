@@ -203,3 +203,8 @@ test('double answer tap remains single submission across event-state checks',asy
  a.run('user={id:"p"};participant={id:"p"};currentGame="trivia";refreshScore=async()=>{}');await a.run('startQuestionSet(1)');a.run('selectedAnswer="A"');
  await Promise.all([a.element('submitAnswer').onclick(),a.element('submitAnswer').onclick()]);assert.equal(submissions,1);
 });
+test('resume restores a selected answer even if pause caught the submit button busy',()=>{
+ const a=app();const button={id:'submitAnswer',dataset:{},disabled:true};a.element('game').querySelectorAll=()=>[button];a.run('selectedAnswer="A";eventPaused=true;applyEventLock()');
+ assert.equal(button.disabled,true);a.run('eventPaused=false;applyEventLock()');assert.equal(button.disabled,false);
+ a.run('selectedAnswer=null;eventPaused=true;applyEventLock();eventPaused=false;applyEventLock()');assert.equal(button.disabled,true);
+});
