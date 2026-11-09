@@ -129,12 +129,12 @@ async function loadParticipant(){
   if(user?.id!==id)return;
   if(error)throw error;
   if(data){participant=data;hide("setup");show("participant");hide("adminLogin");hide("admin");
-    msg("hello",`¡Vamos, ${data.nickname}!`);msg("who",`${data.nickname} · ${data.role}`);msg("myScore",data.points)}
+    msg("hello",`¡Vamos, ${data.nickname}!`);msg("who",`${data.nickname} · ${data.role}`);msg("myScore",data.points);updateAssignmentProgress()}
 }
 async function refreshScore(){
   const id=user?.id;if(!participant || !id)return;
   const {data}=await db.from("participants").select("points").eq("id",id).single();
-  if(data && participant?.id===id){participant.points=data.points;msg("myScore",data.points)}
+  if(data && participant?.id===id){participant.points=data.points;msg("myScore",data.points);updateAssignmentProgress()}
 }
 $("join").onclick=()=>busy($("join"),async()=>{
   if(!needConfig())return;
@@ -153,11 +153,36 @@ $("join").onclick=()=>busy($("join"),async()=>{
     await loadParticipant();msg("setupMsg","");
   }catch{msg("setupMsg",connectionMessage)}
 });
-function closeGame(){stopBlockClock();stopCamera();pageVersion++;hide("game")}
-document.querySelectorAll(".tile").forEach(button=>button.onclick=()=>openPage(button.dataset.page));
-function backButton(id="gameBack"){return `<button class="secondary" id="${id}">Volver al menú</button>`}
+function closeGame(){stopBlockClock();stopCamera();pageVersion++;hide("game");updateAssignmentProgress()}
+document.querySelectorAll(".tile").forEach(button=>button.onclick=()=>{openPage(button.dataset.page,Number(button.dataset.level)||0);$("game").scrollIntoView?.({behavior:"smooth",block:"start"})});
+$("assignmentsNav").onclick=()=>{closeGame();$("assignmentsTitle").scrollIntoView?.({behavior:"smooth"})};
+$("reportNav").onclick=()=>{openPage("ranking");$("game").scrollIntoView?.({behavior:"smooth",block:"start"})};
+$("libraryNav").onclick=()=>{$("eventRules").open=true;$("eventRules").scrollIntoView?.({behavior:"smooth"})};
+let completedView=false;
+function filterAssignments(){
+  document.querySelectorAll(".tile").forEach(b=>b.hidden=completedView?b.dataset.complete!=="true":b.dataset.complete==="true");
+  $("activeAssignments").classList?.toggle("is-active",!completedView);$("completedAssignments").classList?.toggle("is-active",completedView);
+  $("assignmentNotice").textContent=completedView?"Los ítems completados conservan sus resultados y puntajes.":"Elige un ítem para abrir sus desafíos debajo de este recuadro.";
+}
+$("activeAssignments").onclick=()=>{completedView=false;filterAssignments()};
+$("completedAssignments").onclick=()=>{completedView=true;filterAssignments()};
+async function updateAssignmentProgress(){
+  const id=user?.id;if(!id||!participant)return;
+  try{
+    const [q,a,c,s]=await Promise.all([db.from("public_questions").select("id,game,level"),db.from("answer_attempts").select("question_id").eq("participant_id",id),db.from("challenges").select("id").eq("active",true),db.from("submissions").select("challenge_id,status").eq("participant_id",id)]);
+    if(user?.id!==id||[q,a,c,s].some(r=>r.error))return;
+    const answered=new Set((a.data||[]).map(x=>x.question_id)),approved=new Set((s.data||[]).filter(x=>x.status==="approved").map(x=>x.challenge_id));
+    document.querySelectorAll(".tile").forEach(b=>{
+      const photos=b.dataset.page==="objects",rows=photos?(c.data||[]):(q.data||[]).filter(x=>x.game===b.dataset.page&&(x.game!=="trivia"||x.level===Number(b.dataset.level)));
+      const done=rows.filter(x=>photos?approved.has(x.id):answered.has(x.id)).length,total=rows.length,pct=total?Math.round(done/total*100):0;
+      b.dataset.complete=String(total>0&&done===total);b.querySelector(".progress-count").textContent=`${done} / ${total}`;
+      const bar=b.querySelector("[role=progressbar]");bar.setAttribute("aria-valuenow",String(pct));bar.querySelector("i").style.width=`${pct}%`;
+    });filterAssignments();
+  }catch{/* Progress is informational; games retain their own loading and error handling. */}
+}
+function backButton(id="gameBack"){return `<button class="secondary" id="${id}">← Back to Assignments</button>`}
 function gameError(text){$("game").innerHTML=`<p role="status">${escapeHtml(text)}</p>${backButton()}`;$("gameBack").onclick=closeGame}
-async function openPage(page){
+async function openPage(page,chosenLevel=0){
   if(!participant || !needConfig())return;
   stopBlockClock();stopCamera();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
   try{
@@ -174,6 +199,7 @@ async function openPage(page){
     const answered=new Set((attempts.data||[]).map(a=>a.question_id));
     currentQuestions=questions.data||[];
     if(page==="trivia"){
+      if([1,2,3].includes(chosenLevel)){prepareBlock(chosenLevel);return}
       $("game").innerHTML='<h2>Elige el nivel de trivia</h2><p class="muted">Los nombres indican la dificultad. Todos pueden jugar Trivia Nivel FO, Trivia Nivel CT y Trivia Nivel Gerencia, sin importar el cargo registrado. Cada bloque puntúa una sola vez.</p><div class="answers">'+["FO","CT","Gerencia"].map((label,i)=>`<button data-level="${i+1}">Trivia Nivel ${label} · ${currentQuestions.filter(q=>q.level===i+1 && !answered.has(q.id)).length} pendientes</button>`).join("")+`</div>${backButton()}`;
       $("game").querySelectorAll("[data-level]").forEach(b=>b.onclick=()=>prepareBlock(Number(b.dataset.level)));
       $("gameBack").onclick=closeGame;
@@ -208,7 +234,7 @@ async function startQuestionSet(level){
   if(!qs.length){gameError("No hay preguntas disponibles en este bloque.");return}
   const render=()=>{
     const q=qs[index];selectedAnswer=null;
-    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA NIVEL "+["","FO","CT","GERENCIA"][q.level]}</p><p class="muted">Tiempo del bloque: <b id="blockElapsed"></b> · Bono máximo: +50 %</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${Number(state.answered)+index+1} de ${Number(state.total)}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
+    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA NIVEL "+["","FO","CT","GERENCIA"][q.level]}</p><p class="muted">Tiempo del bloque: <b id="blockElapsed"></b> · Bono máximo: +50 %</p><h2>${escapeHtml(q.question)}</h2><div class="question-progress" role="progressbar" aria-label="Progreso del bloque" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round((Number(state.answered)+index)/Number(state.total)*100)}"><i style="width:${Math.round((Number(state.answered)+index)/Number(state.total)*100)}%"></i></div><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${Number(state.answered)+index+1} de ${Number(state.total)}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
     // Retain the same original server anchor between questions.
     const label=$("blockElapsed");label.textContent=formatElapsed(Number(state.elapsed_seconds)+(Date.now()-state.receivedAt)/1000);
     const submit=$("submitAnswer");let submitting=false;
@@ -296,7 +322,7 @@ function photoChallengeMarkup(c,s){
   else controls=`${s?.status==='rejected'?'<p class="msg">La fotografía no cumple el desafío. Puedes tomar otra.</p>'+reason:""}<div id="camera-${c.id}"></div><button data-camera="${c.id}">Abrir cámara</button><button data-save-photo="${c.id}" hidden>Reintentar guardado</button>`;
   // Every path has a camera host and feedback; controls depend on persisted server status.
   if(!controls.includes(`id="camera-${c.id}"`))controls+=`<div id="camera-${c.id}"></div>`;
-  return `<div class="challenge ${done?"challengeComplete":""}"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos · sin cronómetro</small>${controls}<span class="msg" role="status" id="upload-${c.id}"></span></div>`;
+  return `<div class="challenge ${done?"challengeComplete":""}"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos · sin cronómetro</small><div class="question-progress" role="progressbar" aria-label="Progreso del desafío" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${done?100:0}"><i style="width:${done?100:0}%"></i></div>${controls}<span class="msg" role="status" id="upload-${c.id}"></span></div>`;
 }
 async function renderChallenges(){
   stopCamera();

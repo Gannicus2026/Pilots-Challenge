@@ -3,30 +3,35 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
-  <meta name="theme-color" content="#101827"><title>Pilots Challenge</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#494d56"><title>FOPaT · FO FLOOR PAY</title>
+  <link rel="stylesheet" href="styles.css?v=fopat-20261109">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0" integrity="sha384-gnyZit14c5lnGcarmA166QQjjJXpucw25ogZXuwH3HxxY904zHkBqmxVpelsPorb" crossorigin="anonymous"></script>
 </head>
 <body>
-<header class="top"><div class="brand">✈ PILOTS <span>CHALLENGE</span></div><div id="who" class="who"></div></header>
+<header class="top"><div class="brand"><span class="brand-symbol" aria-hidden="true">✈</span><div>FOPaT<small>FO FLOOR PAY</small></div></div><div id="who" class="who"></div></header>
+<div class="sky-banner" aria-hidden="true"></div>
 <main>
   <section id="setup" class="panel narrow">
-    <p class="eyebrow">BIENVENIDO/A A LA COMPETENCIA</p><h1>Entra al desafío</h1>
+    <div class="login-brand"><span class="brand-symbol" aria-hidden="true">✈</span><div>FOPaT<small>FO FLOOR PAY</small></div></div><h1>FO FLOOR PAY</h1><p class="login-subtitle">Participant Panel</p>
     <p class="muted">Usa un pseudónimo. No necesitas instalar nada.</p>
     <label>Pseudónimo<input id="nickname" maxlength="24" placeholder="Ej. Capitán Maverick"></label>
-    <label>Tu cargo<select id="role"><option value="FO">FO</option><option value="CT">CT</option></select></label>
-    <button id="join">Ingresar</button><p id="setupMsg" class="msg"></p>
+    <label>Designación<select id="role"><option value="FO">FO</option><option value="CT">CT</option></select></label>
+    <button id="join">Log in</button><p id="setupMsg" class="msg"></p>
   </section>
 
   <section id="participant" hidden>
-    <div class="welcome panel"><div><p class="eyebrow">TU MISIÓN COMIENZA AHORA</p><h1 id="hello">¡A jugar!</h1><p class="muted">Elige los desafíos que quieras. Todos pueden jugar cualquier nivel de trivia, sin importar si son FO o CT. Puedes volver al menú cuando quieras. En los desafíos de fotos solo cuentan los artículos que tú mismo portes o las prendas que lleves puestas; no se aceptan artículos de otras personas ni prestados para completar el desafío.</p></div><div class="score"><small>TU PUNTAJE</small><strong id="myScore">0</strong></div></div>
-    <button id="participantSignOut" class="secondary">Cerrar sesión de participante</button>
-    <div class="tiles">
-      <button class="tile" data-page="trivia"><b>01</b><span>Trivia por niveles</span><small>Trivia Nivel FO · Nivel CT · Nivel Gerencia</small></button>
-      <button class="tile" data-page="tf"><b>02</b><span>Verdadero o falso</span><small>Preguntas rápidas</small></button>
-      <button class="tile" data-page="objects"><b>03</b><span>¿Quién tiene…?</span><small>Fotos con cámara · sin cronómetro</small></button>
-      <button class="tile" data-page="ranking"><b>04</b><span>Ranking general</span><small>General · FO · CT</small></button>
-    </div>
+    <nav class="portal-nav" aria-label="Navegación principal"><button class="nav-current" id="assignmentsNav">Assignments</button><button id="reportNav">Completion Report</button><button id="libraryNav">Library</button></nav>
+    <div class="portal-heading"><div><p class="eyebrow">FO FLOOR PAY · PARTICIPANT PANEL</p><h1 id="hello">¡A jugar!</h1></div><div class="score"><small>TU PUNTAJE</small><strong id="myScore">0</strong></div></div>
+    <details id="eventRules" class="rules"><summary>Bases e instrucciones</summary><p>Elige los desafíos que quieras. Todos pueden jugar cualquier nivel de trivia, sin importar si son FO o CT. Puedes volver al menú cuando quieras. En los desafíos de fotos solo cuentan los artículos que tú mismo portes o las prendas que lleves puestas; no se aceptan artículos de otras personas ni prestados para completar el desafío.</p></details>
+    <section class="assignments-panel" aria-labelledby="assignmentsTitle"><div class="assignment-heading"><h2 id="assignmentsTitle">New Assignments</h2><span class="due-label">DUE TIME <b>In 1 hour</b></span></div>
+    <div class="assignment-box"><div class="assignment-stripe" aria-hidden="true">✳</div><div class="assignment-content"><div class="assignment-tabs"><button id="activeAssignments" class="is-active">Active Assignments</button><button id="completedAssignments">Completed Assignments</button></div><p id="assignmentNotice" class="assignment-notice" role="status">Elige un ítem para abrir sus desafíos debajo de este recuadro.</p><div class="tiles">
+<button class="tile" data-key="fo" data-page="trivia" data-level="1"><span class="assignment-icon" aria-hidden="true">▤</span><span class="tile-copy"><span>Trivia Nivel FO</span><small>Complejidad media a baja</small><span class="assignment-progress" role="progressbar" aria-label="Progreso de Trivia Nivel FO" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></span><small class="progress-count">—</small></button>
+<button class="tile" data-key="ct" data-page="trivia" data-level="2"><span class="assignment-icon" aria-hidden="true">▤</span><span class="tile-copy"><span>Trivia Nivel CT</span><small>Preguntas específicas y difíciles</small><span class="assignment-progress" role="progressbar" aria-label="Progreso de Trivia Nivel CT" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></span><small class="progress-count">—</small></button>
+<button class="tile" data-key="management" data-page="trivia" data-level="3"><span class="assignment-icon" aria-hidden="true">▤</span><span class="tile-copy"><span>Trivia Nivel Gerencia</span><small>Conocimientos de compañía y estrategia</small><span class="assignment-progress" role="progressbar" aria-label="Progreso de Trivia Nivel Gerencia" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></span><small class="progress-count">—</small></button>
+<button class="tile" data-key="tf" data-page="tf"><span class="assignment-icon" aria-hidden="true">▤</span><span class="tile-copy"><span>Verdadero o falso</span><small>Historias de aviación</small><span class="assignment-progress" role="progressbar" aria-label="Progreso de Verdadero o falso" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></span><small class="progress-count">—</small></button>
+<button class="tile" data-key="objects" data-page="objects"><span class="assignment-icon" aria-hidden="true">▤</span><span class="tile-copy"><span>¿Quién tiene…?</span><small>Fotos con cámara · sin cronómetro</small><span class="assignment-progress" role="progressbar" aria-label="Progreso de ¿Quién tiene…?" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></span><small class="progress-count">—</small></button>
+</div></div></div></section>
+    <button id="participantSignOut" class="secondary signout">Cerrar sesión de participante</button>
     <section id="game" class="panel" hidden></section>
   </section>
 
@@ -81,9 +86,9 @@
     <section class="panel"><h2>Preguntas existentes</h2><p class="muted">Puedes desactivar contenido conservando las respuestas y los puntajes registrados.</p><div id="questionList"></div></section>
     <section class="panel"><h2>Evidencias pendientes</h2><div id="pending"></div></section>
     <section class="panel"><h2>Participantes y puntajes</h2><div id="adminRanking"></div></section>
-    <section class="panel"><h2>Acceso para los invitados</h2><p>Comparte este QR o el enlace para entrar desde el teléfono.</p><img class="entryQr" src="entry-qr.svg" alt="Código QR para entrar a Pilots Challenge"><p><a href="entry-qr.svg" download="pilots-challenge-qr.svg">Descargar QR para imprimir</a></p><a href="https://gannicus2026.github.io/Pilots-Challenge/">https://gannicus2026.github.io/Pilots-Challenge/</a></section>
+    <section class="panel"><h2>Acceso para los invitados</h2><p>Comparte este QR o el enlace para entrar desde el teléfono.</p><img class="entryQr" src="entry-qr.svg" alt="Código QR para entrar a FOPaT"><p><a href="entry-qr.svg" download="pilots-challenge-qr.svg">Descargar QR para imprimir</a></p><a href="https://gannicus2026.github.io/Pilots-Challenge/">https://gannicus2026.github.io/Pilots-Challenge/</a></section>
   </section>
 </main>
-<footer><button id="adminLink" class="linkbtn">Acceso organizador</button><span> · Pilots Challenge</span></footer>
-<script src="app.js?v=20261109-personal-items"></script>
+<footer><button id="adminLink" class="linkbtn">Acceso organizador</button><span> · FOPaT · FO FLOOR PAY</span></footer>
+<script src="app.js?v=fopat-20261109"></script>
 </body></html>
