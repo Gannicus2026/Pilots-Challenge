@@ -3,12 +3,13 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync('app.js','utf8').replace('if(configured)session();','');
-function app({hash='',search='',session=null,admin=false,from=null,rpc=null,auth={},mediaDevices={},storage=null,functions={invoke:async()=>({data:{ready:false}})}}={}){
+function app({hash='',search='',session=null,admin=false,from=null,rpc=null,auth={},mediaDevices={},storage=null,functions={invoke:async()=>({data:{ready:false}})},eventState={paused:false,closes_at:null,server_now:new Date().toISOString()}}={}){
  const elements=new Map();
  const element=id=>{if(!elements.has(id))elements.set(id,{hidden:false,value:'',textContent:'',disabled:false,checked:false,querySelectorAll:()=>[],querySelector:()=>null,focus(){},reset(){element('newPassword').value='';element('confirmPassword').value=''},reportValidity:()=>true});return elements.get(id)};
  const sessionValues=new Map();let listener,updates=0,signouts=0;
  const db={auth:{onAuthStateChange:fn=>{listener=fn},getSession:async()=>({data:{session}}),getUser:async()=>({data:{user:session?.user}}),updateUser:async()=>{updates++;return{}},signOut:async()=>{signouts++;session=null;listener('SIGNED_OUT');return{}},resetPasswordForEmail:async()=>({})},rpc:async()=>({data:admin})};
  Object.assign(db.auth,auth);if(from)db.from=from;if(rpc)db.rpc=rpc;if(storage)db.storage=storage;db.functions=functions;
+ const baseRpc=db.rpc;db.rpc=(name,args)=>name==='get_event_state'?Promise.resolve({data:eventState}):baseRpc(name,args);
  const context=vm.createContext({navigator:{mediaDevices},window:{addEventListener(){},supabase:{createClient:()=>db},scrollTo(){}},document:{addEventListener(){},getElementById:element,querySelectorAll:()=>[]},location:{hash,search,href:'https://example.test/Pilots-Challenge/'+search+hash,pathname:'/Pilots-Challenge/',origin:'https://example.test'},history:{replaceState(){}},sessionStorage:{getItem:k=>sessionValues.get(k),setItem:(k,v)=>sessionValues.set(k,v),removeItem:k=>sessionValues.delete(k)},crypto:require("node:crypto").webcrypto,URL,URLSearchParams,setInterval:()=>1,clearInterval(){},console,confirm:()=>true,alert:()=>{}});
  vm.runInContext(source,context);vm.runInContext("photoConsent=true",context);
  return {element,run:code=>vm.runInContext(code,context),event:(e,s)=>listener(e,s),updates:()=>updates,signouts:()=>signouts};
@@ -98,7 +99,7 @@ test('camera denial gives an actionable message without permitting gallery uploa
 test('camera stream resolved after leaving the page is stopped',async()=>{
  let resolve,stopped=0;
  const a=app({mediaDevices:{getUserMedia:()=>new Promise(r=>{resolve=r})}});
- a.run('participant={id:"p"}');const pending=a.run('openCamera("test")');a.run('closeGame()');
+ a.run('participant={id:"p"}');const pending=a.run('openCamera("test")');await new Promise(setImmediate);a.run('closeGame()');
  resolve({getTracks:()=>[{stop(){stopped++}}]});await pending;assert.equal(stopped,1);
 });
 test('evidence cannot be uploaded without a live camera capture',async()=>{
@@ -135,7 +136,7 @@ test('completion displays server bonus separately and does not calculate score i
 });
 test('leaving while a block request is pending does not reopen the game',async()=>{
  let resolve;const a=app({rpc:()=>new Promise(r=>{resolve=r})});
- a.run('participant={id:"p"};currentGame="trivia"');const pending=a.run('startQuestionSet(1)');a.run('closeGame()');
+ a.run('participant={id:"p"};currentGame="trivia"');const pending=a.run('startQuestionSet(1)');await new Promise(setImmediate);a.run('closeGame()');
  resolve({data:{finished:true,correct:1,total:1,base_points:10,bonus_points:5,elapsed_seconds:0}});await pending;
  assert.equal(a.element('game').hidden,true);assert.doesNotMatch(a.element('game').innerHTML||'',/Bloque terminado/);
 });
@@ -156,7 +157,7 @@ test('photo is saved even when the participant switches to another item during u
  let resolve,saves=0;
  const a=app({storage:{from:()=>({upload:()=>new Promise(r=>{resolve=r})})},rpc:async name=>{assert.equal(name,'save_photo_submission');saves++;return{data:{id:'s',status:'pending'}}}});
  a.run('user={id:"player"};participant={id:"player"};capturedPhotos.set("c",{file:{type:"image/jpeg",size:100}})');
- const pending=a.run('uploadEvidence("c")');a.run('closeGame();currentGame="ranking"');resolve({});await pending;
+ const pending=a.run('uploadEvidence("c")');await new Promise(setImmediate);a.run('closeGame();currentGame="ranking"');resolve({});await pending;
  assert.equal(saves,1);assert.equal(a.run('capturedPhotos.has("c")'),false);assert.equal(a.element('game').hidden,true);
 });
 test('saving retry reuses the already uploaded private object',async()=>{
@@ -169,7 +170,7 @@ test('background AI result refreshes score without reopening the photo item',asy
  let resolve,refreshes=0;
  const a=app({functions:{invoke:()=>new Promise(r=>{resolve=r})}});
  a.element('scoreBridge').update=()=>{refreshes++};a.run('user={id:"player"};participant={id:"player"};photoAIReady=true;currentGame="objects";refreshScore=async()=>document.getElementById("scoreBridge").update()');
- const pending=a.run('analyzeEvidence("submission","challenge")');a.run('closeGame();currentGame="trivia"');resolve({data:{status:'approved',points:10}});await pending;
+ const pending=a.run('analyzeEvidence("submission","challenge")');await new Promise(setImmediate);a.run('closeGame();currentGame="trivia"');resolve({data:{status:'approved',points:10}});await pending;
  assert.equal(refreshes,1);assert.equal(a.element('game').hidden,true);
 });
 
@@ -181,4 +182,24 @@ test('assignment opens chosen trivia level directly without starting its clock',
  assert.match(a.element('game').innerHTML,/Comenzar \/ continuar bloque/);
  assert.doesNotMatch(a.element('game').innerHTML,/Elige el nivel/);
  assert.deepEqual(queries,['public_questions','answer_attempts']);
+});
+
+test('closed event blocks cached assignment and camera without losing captured evidence',async()=>{
+ let calls=0,camera=0;
+ const a=app({eventState:{paused:true,paused_at:new Date().toISOString(),closes_at:null,server_now:new Date().toISOString()},rpc:async()=>{calls++;return{}},mediaDevices:{getUserMedia:async()=>{camera++;return{}}}});
+ a.run('user={id:"player"};participant={id:"player"};currentGame="trivia";capturedPhotos.set("c",{file:{type:"image/jpeg",size:100}})');
+ await a.run('startQuestionSet(1)');await a.run('openCamera("c")');await a.run('uploadEvidence("c")');
+ assert.equal(calls,0);assert.equal(camera,0);assert.equal(a.run('capturedPhotos.has("c")'),true);
+ assert.match(a.element('eventBanner').textContent,/congelados/);
+});
+test('ranking remains accessible while event is closed',async()=>{
+ const a=app({eventState:{paused:true,paused_at:new Date().toISOString(),closes_at:null,server_now:new Date().toISOString()}});
+ a.run('user={id:"player"};participant={id:"player"};renderRanking=async()=>document.getElementById("rankBridge").textContent="loaded";refreshScore=async()=>{}');
+ await a.run('openPage("ranking")');assert.equal(a.element('rankBridge').textContent,'loaded');assert.equal(a.element('game').hidden,false);
+});
+test('double answer tap remains single submission across event-state checks',async()=>{
+ let submissions=0;
+ const a=app({rpc:async name=>name==='start_block'?{data:{finished:false,total:1,answered:0,elapsed_seconds:0,server_now:new Date().toISOString(),questions:[{id:'q',game:'trivia',level:1,question:'Test',options:['A','B','C','D']}]}}:name==='submit_answer'?(submissions++,{data:{correct:true,points:10,block:{finished:true,total:1,correct:1,elapsed_seconds:1,base_points:10,bonus_points:5,bonus_eligible:true}}}):{}});
+ a.run('user={id:"p"};participant={id:"p"};currentGame="trivia";refreshScore=async()=>{}');await a.run('startQuestionSet(1)');a.run('selectedAnswer="A"');
+ await Promise.all([a.element('submitAnswer').onclick(),a.element('submitAnswer').onclick()]);assert.equal(submissions,1);
 });
