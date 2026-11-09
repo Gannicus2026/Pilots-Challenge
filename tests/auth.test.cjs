@@ -3,14 +3,14 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync('app.js','utf8').replace('if(configured)session();','');
-function app({hash='',search='',session=null,admin=false,from=null,rpc=null,auth={},mediaDevices={}}={}){
+function app({hash='',search='',session=null,admin=false,from=null,rpc=null,auth={},mediaDevices={},storage=null,functions={invoke:async()=>({data:{ready:false}})}}={}){
  const elements=new Map();
- const element=id=>{if(!elements.has(id))elements.set(id,{hidden:false,value:'',textContent:'',disabled:false,checked:false,querySelectorAll:()=>[],focus(){},reset(){element('newPassword').value='';element('confirmPassword').value=''},reportValidity:()=>true});return elements.get(id)};
- const storage=new Map();let listener,updates=0,signouts=0;
+ const element=id=>{if(!elements.has(id))elements.set(id,{hidden:false,value:'',textContent:'',disabled:false,checked:false,querySelectorAll:()=>[],querySelector:()=>null,focus(){},reset(){element('newPassword').value='';element('confirmPassword').value=''},reportValidity:()=>true});return elements.get(id)};
+ const sessionValues=new Map();let listener,updates=0,signouts=0;
  const db={auth:{onAuthStateChange:fn=>{listener=fn},getSession:async()=>({data:{session}}),getUser:async()=>({data:{user:session?.user}}),updateUser:async()=>{updates++;return{}},signOut:async()=>{signouts++;session=null;listener('SIGNED_OUT');return{}},resetPasswordForEmail:async()=>({})},rpc:async()=>({data:admin})};
- Object.assign(db.auth,auth);if(from)db.from=from;if(rpc)db.rpc=rpc;
- const context=vm.createContext({navigator:{mediaDevices},window:{addEventListener(){},supabase:{createClient:()=>db},scrollTo(){}},document:{addEventListener(){},getElementById:element,querySelectorAll:()=>[]},location:{hash,search,href:'https://example.test/Pilots-Challenge/'+search+hash,pathname:'/Pilots-Challenge/',origin:'https://example.test'},history:{replaceState(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},URL,URLSearchParams,setInterval:()=>1,clearInterval(){},console,confirm:()=>true,alert:()=>{}});
- vm.runInContext(source,context);
+ Object.assign(db.auth,auth);if(from)db.from=from;if(rpc)db.rpc=rpc;if(storage)db.storage=storage;db.functions=functions;
+ const context=vm.createContext({navigator:{mediaDevices},window:{addEventListener(){},supabase:{createClient:()=>db},scrollTo(){}},document:{addEventListener(){},getElementById:element,querySelectorAll:()=>[]},location:{hash,search,href:'https://example.test/Pilots-Challenge/'+search+hash,pathname:'/Pilots-Challenge/',origin:'https://example.test'},history:{replaceState(){}},sessionStorage:{getItem:k=>sessionValues.get(k),setItem:(k,v)=>sessionValues.set(k,v),removeItem:k=>sessionValues.delete(k)},crypto:require("node:crypto").webcrypto,URL,URLSearchParams,setInterval:()=>1,clearInterval(){},console,confirm:()=>true,alert:()=>{}});
+ vm.runInContext(source,context);vm.runInContext("photoConsent=true",context);
  return {element,run:code=>vm.runInContext(code,context),event:(e,s)=>listener(e,s),updates:()=>updates,signouts:()=>signouts};
 }
 test('expired recovery never enables password update',async()=>{
@@ -104,19 +104,19 @@ test('camera stream resolved after leaving the page is stopped',async()=>{
 test('evidence cannot be uploaded without a live camera capture',async()=>{
  const a=app();await a.run('uploadEvidence("test")');assert.match(a.element('upload-test').textContent,/cámara/);
 });
-test('live camera capture stops the stream and enables evidence upload',async()=>{
+test('live camera capture stops the stream, locks the button and automatically saves',async()=>{
  let stopped=0,requested,drawn=0;
  const video={videoWidth:1920,videoHeight:1080,play:async()=>{}};
  const shutter={},cancel={},upload={disabled:true};const photo={type:'image/jpeg',size:1000};
  const canvas={getContext:()=>({drawImage(){drawn++}}),toBlob:fn=>fn(photo),setAttribute(){}};
- const a=app({mediaDevices:{getUserMedia:async options=>{requested=options;return{getTracks:()=>[{stop(){stopped++}}]}}}});
+ const a=app({mediaDevices:{getUserMedia:async options=>{requested=options;return{getTracks:()=>[{stop(){stopped++}}]}}}});a.run('uploadEvidence=async()=>{capturedPhotos.get("test").autoSaved=true}');
  a.element('camera-test').querySelector=selector=>selector==='video'?video:selector==='[data-shutter]'?shutter:cancel;
  a.element('camera-test').appendChild=()=>{};a.element('game').querySelector=()=>upload;
  a.run('participant={id:"p"}');a.run('document.createElement=()=>({})');
  // Supply the canvas through a test-only bridge, without a file selector.
  a.element('canvasBridge').canvas=canvas;a.run('document.createElement=()=>document.getElementById("canvasBridge").canvas');
  await a.run('openCamera("test")');assert.equal(requested.audio,false);assert.equal(upload.disabled,true);
- await shutter.onclick();assert.equal(drawn,1);assert.equal(stopped,1);assert.equal(upload.disabled,false);
+ await shutter.onclick();assert.equal(drawn,1);assert.equal(stopped,1);assert.equal(upload.disabled,true);assert.equal(a.run('capturedPhotos.get("test").autoSaved'),true);
  assert.equal(a.run('capturedPhotos.get("test").file.type'),'image/jpeg');
 });
 test('block starts through server RPC and shows persisted elapsed time',async()=>{
@@ -138,4 +138,37 @@ test('leaving while a block request is pending does not reopen the game',async()
  a.run('participant={id:"p"};currentGame="trivia"');const pending=a.run('startQuestionSet(1)');a.run('closeGame()');
  resolve({data:{finished:true,correct:1,total:1,base_points:10,bonus_points:5,elapsed_seconds:0}});await pending;
  assert.equal(a.element('game').hidden,true);assert.doesNotMatch(a.element('game').innerHTML||'',/Bloque terminado/);
+});
+test('photo capture requires consent before requesting the camera',async()=>{
+ let calls=0;const a=app({mediaDevices:{getUserMedia:async()=>{calls++}}});a.run('photoConsent=false');
+ await a.run('openCamera("test")');assert.equal(calls,0);assert.match(a.element('upload-test').textContent,/Autoriza/);
+});
+test('completed photo challenge shows disabled completion controls',()=>{
+ const a=app();const markup=a.run('photoChallengeMarkup({id:"c",description:"Object",points:10},{status:"approved"})');
+ assert.match(markup,/Desafío completado/);assert.match(markup,/<button disabled>Completado/);assert.doesNotMatch(markup,/data-camera|data-analyze|data-save-photo/);
+});
+test('captured photo survives leaving the item before it is saved',()=>{
+ const a=app();a.run('capturedPhotos.set("c",{file:{type:"image/jpeg",size:100}});closeGame()');
+ assert.equal(a.run('capturedPhotos.has("c")'),true);
+ assert.match(a.run('photoChallengeMarkup({id:"c",description:"Object",points:10},null)'),/Reintentar guardado/);
+});
+test('photo is saved even when the participant switches to another item during upload',async()=>{
+ let resolve,saves=0;
+ const a=app({storage:{from:()=>({upload:()=>new Promise(r=>{resolve=r})})},rpc:async name=>{assert.equal(name,'save_photo_submission');saves++;return{data:{id:'s',status:'pending'}}}});
+ a.run('user={id:"player"};participant={id:"player"};capturedPhotos.set("c",{file:{type:"image/jpeg",size:100}})');
+ const pending=a.run('uploadEvidence("c")');a.run('closeGame();currentGame="ranking"');resolve({});await pending;
+ assert.equal(saves,1);assert.equal(a.run('capturedPhotos.has("c")'),false);assert.equal(a.element('game').hidden,true);
+});
+test('saving retry reuses the already uploaded private object',async()=>{
+ let uploads=0,saves=0;
+ const a=app({storage:{from:()=>({upload:async()=>{uploads++;return{}}})},rpc:async()=>{saves++;return saves===1?{error:{message:'temporary'}}:{data:{id:'s',status:'pending'}}}});
+ a.run('user={id:"player"};participant={id:"player"};renderChallenges=async()=>{};capturedPhotos.set("c",{file:{type:"image/jpeg",size:100}})');
+ await a.run('uploadEvidence("c")');await a.run('uploadEvidence("c")');assert.equal(uploads,1);assert.equal(saves,2);
+});
+test('background AI result refreshes score without reopening the photo item',async()=>{
+ let resolve,refreshes=0;
+ const a=app({functions:{invoke:()=>new Promise(r=>{resolve=r})}});
+ a.element('scoreBridge').update=()=>{refreshes++};a.run('user={id:"player"};participant={id:"player"};photoAIReady=true;currentGame="objects";refreshScore=async()=>document.getElementById("scoreBridge").update()');
+ const pending=a.run('analyzeEvidence("submission","challenge")');a.run('closeGame();currentGame="trivia"');resolve({data:{status:'approved',points:10}});await pending;
+ assert.equal(refreshes,1);assert.equal(a.element('game').hidden,true);
 });
