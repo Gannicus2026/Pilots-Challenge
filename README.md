@@ -45,6 +45,6 @@ Los nombres FO, CT y Gerencia son niveles de trivia de libre elección; el cargo
 
 FO, CT, Gerencia y Verdadero/Falso se cronometran por separado. El servidor guarda el comienzo al pulsar Comenzar; salir, recargar o volver al menú no pausa ni reinicia el tiempo. Las preguntas de ese bloque quedan fijadas al comenzar.
 
-Cada acierto mantiene su valor. Al responder la última pregunta se agrega una sola vez `floor(puntos_por_aciertos × 0.5 × clamp((600 − segundos) / 480, 0, 1))`: hasta 2 minutos, +50 %; a los 6 minutos, +25 %; desde los 10 minutos, sin bono. El bono no afecta a desafíos fotográficos. Cero aciertos da cero bono. El reloj del dispositivo solo sirve para mostrar el tiempo; el servidor calcula el puntaje.
+Cada acierto mantiene su valor. Al responder la última pregunta se agrega una sola vez `floor(puntos_por_aciertos × 0.5 × clamp((180 − segundos) / 150, 0, 1))`: hasta 30 segundos, +50 %; a 1 minuto y 45 segundos, +25 %; desde los 3 minutos, sin bono. El bono no afecta a desafíos fotográficos. Cero aciertos da cero bono. El reloj del dispositivo solo sirve para mostrar el tiempo; el servidor calcula el puntaje.
 
 Las sesiones iniciadas mediante clientes antiguos conservan sus puntos y no reciben bonos retroactivos. Las tablas de cronometraje y sus preguntas con clave están en el esquema privado `pilots_private`, con RLS y sin acceso directo de participantes. Las funciones públicas usan wrappers sin privilegios elevados y las funciones privadas validan la identidad y serializan los cambios por participante.

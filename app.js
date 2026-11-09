@@ -190,7 +190,7 @@ function startBlockClock(state){
 }
 function prepareBlock(level){
   const title=currentGame==="tf"?"Verdadero o Falso":["","Trivia FO","Trivia CT","Trivia Gerencia"][level];
-  $("game").innerHTML=`<h2>${title}</h2><p>El tiempo empieza al pulsar Comenzar. Si ya iniciaste este bloque, continuará desde el inicio original.</p><p>Los aciertos mantienen su puntaje. Al completar el bloque obtienes hasta un 50 % adicional sobre esos puntos: bono completo hasta 2 minutos, que disminuye gradualmente hasta cero a los 10 minutos.</p><p class="muted">Salir o recargar no pausa el tiempo. Cada bloque y su bono puntúan una sola vez.</p><button id="beginBlock">Comenzar / continuar bloque</button>${backButton()}`;
+  $("game").innerHTML=`<h2>${title}</h2><p>El tiempo empieza al pulsar Comenzar. Si ya iniciaste este bloque, continuará desde el inicio original.</p><p>Los aciertos mantienen su puntaje. Al completar el bloque obtienes hasta un 50 % adicional sobre esos puntos: bono completo hasta 30 segundos, que disminuye gradualmente hasta cero a los 3 minutos.</p><p class="muted">Salir o recargar no pausa el tiempo. Cada bloque y su bono puntúan una sola vez.</p><button id="beginBlock">Comenzar / continuar bloque</button>${backButton()}`;
   $("beginBlock").onclick=()=>busy($("beginBlock"),()=>startQuestionSet(level));$("gameBack").onclick=closeGame;
 }
 function renderBlockResult(state){
