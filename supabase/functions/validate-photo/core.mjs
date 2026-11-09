@@ -10,6 +10,23 @@ function imageType(bytes){
 }
 function base64(bytes){let text='';for(let i=0;i<bytes.length;i+=8192)text+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(text)}
 export function createHandler({env,fetchFn=fetch}){
+ let healthPromise=null,healthExpires=0;
+ const providerHealth=(apiKey,model)=>{
+  if(!healthPromise||Date.now()>healthExpires){
+   healthExpires=Date.now()+60000;
+   healthPromise=(async()=>{
+    if(!/^[a-zA-Z0-9._-]{1,80}$/.test(model))return {connection_ok:false,provider_code:'INVALID_MODEL'};
+    try{
+     const response=await fetchFn(`https://generativelanguage.googleapis.com/v1beta/models/${model}`,{headers:{'x-goog-api-key':apiKey},signal:AbortSignal.timeout(10000)});
+     if(response.ok)return {connection_ok:true,provider_http_status:response.status};
+     let detail;try{detail=await response.json()}catch{}
+     const code=detail?.error?.details?.find(x=>typeof x.reason==='string')?.reason||detail?.error?.status||'PROVIDER_ERROR';
+     return {connection_ok:false,provider_http_status:response.status,provider_code:/^[A-Z_]{1,80}$/.test(code)?code:'PROVIDER_ERROR'};
+    }catch{return {connection_ok:false,provider_code:'CONNECTION_ERROR'}}
+   })();
+  }
+  return healthPromise;
+ };
  return async function handle(req){
   const headers={'Access-Control-Allow-Origin':ORIGIN,'Access-Control-Allow-Headers':'authorization,x-client-info,apikey,content-type,x-supabase-api-version','Access-Control-Allow-Methods':'GET,POST,OPTIONS','Content-Type':'application/json','Vary':'Origin','Cache-Control':'no-store'};
   const reply=(body,status=200)=>new Response(JSON.stringify(body),{status,headers});
@@ -18,7 +35,7 @@ export function createHandler({env,fetchFn=fetch}){
   const url=env('SUPABASE_URL')||'',pub=keyFrom(env,'SUPABASE_PUBLISHABLE_KEYS','SUPABASE_ANON_KEY'),secret=keyFrom(env,'SUPABASE_SECRET_KEYS','SUPABASE_SERVICE_ROLE_KEY');
   const gemini=env('GEMINI_API_KEY')||'';
   const ready=env('PHOTO_AI_ENABLED')==='true'&&!!gemini&&!!url&&!!pub&&!!secret;
-  if(req.method==='GET')return reply({ready,provider:'Google Gemini'});
+  if(req.method==='GET'){const model=env('GEMINI_MODEL')||'gemini-2.5-flash-lite';return reply({ready,provider:'Google Gemini',model,...(ready?await providerHealth(gemini,model):{})})}
   if(req.method!=='POST')return reply({message:'Método no permitido.'},405);
   const auth=req.headers.get('authorization')||'';
   if(!/^Bearer [A-Za-z0-9._-]+$/.test(auth))return reply({message:'Inicia sesión para validar la foto.'},401);
@@ -27,7 +44,7 @@ export function createHandler({env,fetchFn=fetch}){
   const adminHeaders={apikey:secret,'Content-Type':'application/json',...(secret.startsWith('eyJ')?{Authorization:`Bearer ${secret}`}:{})};
   const rpc=async(name,args)=>{
    const response=await timedFetch(`${url}/rest/v1/rpc/${name}`,{method:'POST',headers:adminHeaders,body:JSON.stringify(args)},10000);
-   if(!response.ok)throw new Error('database');return response.json();
+   if(!response.ok){const failure=new Error('database');failure.operation=name;failure.httpStatus=response.status;throw failure}return response.json();
   };
   try{
    if(!url||!pub)return reply({message:'La validación IA aún no está configurada.'},503);
@@ -54,17 +71,23 @@ export function createHandler({env,fetchFn=fetch}){
      generationConfig:{temperature:0,maxOutputTokens:350,responseMimeType:'application/json',responseSchema:{type:'OBJECT',properties:{accepted:{type:'BOOLEAN'},confidence:{type:'NUMBER'},reason:{type:'STRING'}},required:['accepted','confidence','reason']}}
     })
    });
-   if(!response.ok)throw new Error(response.status===429?'quota':'provider');
+   if(!response.ok){
+    let detail;try{detail=await response.json()}catch{}
+    const reason=detail?.error?.details?.find(x=>typeof x.reason==='string')?.reason||detail?.error?.status||'PROVIDER_ERROR';
+    const failure=new Error(response.status===429?'quota':'provider');failure.providerStatus=response.status;failure.providerCode=/^[A-Z_]{1,80}$/.test(reason)?reason:'PROVIDER_ERROR';throw failure;
+   }
    const generated=await response.json();const raw=(generated.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('');
-   if(raw.length>4000)throw new Error('provider');
-   let verdict;try{verdict=JSON.parse(raw)}catch{throw new Error('provider')}
-   if(typeof verdict.accepted!=='boolean'||typeof verdict.confidence!=='number'||!Number.isFinite(verdict.confidence)||verdict.confidence<0||verdict.confidence>1||typeof verdict.reason!=='string')throw new Error('provider');
+   if(raw.length>4000)throw new Error('provider_result');
+   let verdict;try{verdict=JSON.parse(raw)}catch{const failure=new Error('provider_result');const finish=generated.candidates?.[0]?.finishReason;failure.finishReason=typeof finish==='string'&&/^[A-Z_]{1,80}$/.test(finish)?finish:'NO_RESULT';throw failure}
+   if(typeof verdict.accepted!=='boolean'||typeof verdict.confidence!=='number'||!Number.isFinite(verdict.confidence)||verdict.confidence<0||verdict.confidence>1||typeof verdict.reason!=='string')throw new Error('provider_result');
    const accepted=verdict.accepted&&verdict.confidence>=0.9;
    const reason=verdict.accepted&&!accepted?'La foto no muestra con suficiente claridad todos los requisitos. Toma otra fotografía.':verdict.reason.slice(0,300);
    const result=await rpc('finish_photo_review',{p_token:token,p_accepted:accepted,p_confidence:verdict.confidence,p_reason:reason,p_error:false});
    return reply(result);
   }catch(error){
-   const message=error.message==='quota'?'La IA alcanzó su cupo temporal. Tu foto está guardada; reintenta más tarde.':error.message==='image'?'No se pudo leer la fotografía. Intenta con una foto nueva.':'La IA no pudo completar la validación. Tu foto está guardada; puedes reintentar.';
+   console.warn(JSON.stringify({component:'photo-validation',stage:['quota','provider','provider_result','database','image'].includes(error.message)?error.message:'connection',http_status:error.providerStatus||error.httpStatus||undefined,code:error.providerCode,operation:error.operation,finish_reason:error.finishReason}));
+   const providerMessage=error.providerCode==='API_KEY_INVALID'?'Google rechazó la clave de Gemini. El organizador debe revisar GEMINI_API_KEY.':error.providerStatus===403?'Google no permite usar esta clave para validar imágenes. El organizador debe revisar los permisos de Gemini.':error.providerStatus===404?'Google no encuentra el modelo configurado. El organizador debe revisar la configuración de IA.':error.message==='provider_result'?'Gemini no devolvió una validación completa. Tu foto está guardada; puedes reintentar.':null;
+   const message=providerMessage||(error.message==='quota'?'La IA alcanzó su cupo temporal. Tu foto está guardada; reintenta más tarde.':error.message==='image'?'No se pudo leer la fotografía. Intenta con una foto nueva.':'La IA no pudo completar la validación. Tu foto está guardada; puedes reintentar.');
    if(token)try{await rpc('finish_photo_review',{p_token:token,p_accepted:false,p_confidence:0,p_reason:message,p_error:true})}catch{/* Never award points on an infrastructure failure. */}
    return reply({code:'AI_UNAVAILABLE',message},503);
   }
