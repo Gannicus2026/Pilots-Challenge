@@ -15,7 +15,7 @@ const show=(id)=>$(id).hidden=false, hide=(id)=>$(id).hidden=true;
 const msg=(id,s)=>$(id).textContent=s;
 function needConfig(){if(!db){alert("Falta configurar Supabase. Sigue los pasos del archivo README.");return false}return true}
 function resetScreen(){
-  stopCamera();capturedPhotos.clear();pageVersion++;questionCache=[];challengeCache=[];
+  stopBlockClock();stopCamera();capturedPhotos.clear();pageVersion++;questionCache=[];challengeCache=[];
   if(typeof $("qGame").onchange==="function")clearQuestion();
   clearChallenge();$("newPasswordForm").reset();
   ["setup","participant","adminLogin","admin","game","passwordRecovery"].forEach(hide);
@@ -153,13 +153,13 @@ $("join").onclick=()=>busy($("join"),async()=>{
     await loadParticipant();msg("setupMsg","");
   }catch{msg("setupMsg",connectionMessage)}
 });
-function closeGame(){stopCamera();capturedPhotos.clear();pageVersion++;hide("game")}
+function closeGame(){stopBlockClock();stopCamera();capturedPhotos.clear();pageVersion++;hide("game")}
 document.querySelectorAll(".tile").forEach(button=>button.onclick=()=>openPage(button.dataset.page));
 function backButton(id="gameBack"){return `<button class="secondary" id="${id}">Volver al menú</button>`}
 function gameError(text){$("game").innerHTML=`<p role="status">${escapeHtml(text)}</p>${backButton()}`;$("gameBack").onclick=closeGame}
 async function openPage(page){
   if(!participant || !needConfig())return;
-  stopCamera();capturedPhotos.clear();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
+  stopBlockClock();stopCamera();capturedPhotos.clear();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
   try{
     if(page==="ranking"){await renderRanking();await refreshScore();return}
     if(page==="objects"){await renderChallenges();return}
@@ -172,21 +172,45 @@ async function openPage(page){
     if(version!==pageVersion || user?.id!==id)return;
     if(questions.error || attempts.error){gameError("No se pudieron cargar las preguntas y tu progreso. Intenta nuevamente.");return}
     const answered=new Set((attempts.data||[]).map(a=>a.question_id));
-    currentQuestions=(questions.data||[]).filter(q=>!answered.has(q.id));
+    currentQuestions=questions.data||[];
     if(page==="trivia"){
-      $("game").innerHTML='<h2>Elige tu nivel</h2><p class="muted">Puedes jugar los tres niveles. Cada pregunta puntúa una sola vez.</p><div class="answers">'+["FO","CT","Gerencia"].map((label,i)=>`<button data-level="${i+1}">${label} · ${currentQuestions.filter(q=>q.level===i+1).length} pendientes</button>`).join("")+`</div>${backButton()}`;
-      $("game").querySelectorAll("[data-level]").forEach(b=>b.onclick=()=>startQuestionSet(Number(b.dataset.level)));
+      $("game").innerHTML='<h2>Elige tu nivel</h2><p class="muted">Puedes jugar los tres niveles. Cada pregunta puntúa una sola vez.</p><div class="answers">'+["FO","CT","Gerencia"].map((label,i)=>`<button data-level="${i+1}">${label} · ${currentQuestions.filter(q=>q.level===i+1 && !answered.has(q.id)).length} pendientes</button>`).join("")+`</div>${backButton()}`;
+      $("game").querySelectorAll("[data-level]").forEach(b=>b.onclick=()=>prepareBlock(Number(b.dataset.level)));
       $("gameBack").onclick=closeGame;
-    }else startQuestionSet(null);
+    }else prepareBlock(1);
   }catch{if(version===pageVersion)gameError(connectionMessage)}
 }
-function startQuestionSet(level){
-  const qs=currentQuestions.filter(q=>level===null||q.level===level);let index=0,correct=0,answered=0;
+let blockClock=null;
+function stopBlockClock(){if(blockClock!==null)clearInterval(blockClock);blockClock=null}
+function formatElapsed(seconds){const n=Math.max(0,Math.floor(Number(seconds)||0));return `${Math.floor(n/60)}:${String(n%60).padStart(2,"0")}`}
+function startBlockClock(state){
+  stopBlockClock();const anchor=Date.now(),elapsed=Number(state.elapsed_seconds)||0;
+  const tick=()=>{const label=$("blockElapsed");if(label)label.textContent=formatElapsed(elapsed+(Date.now()-anchor)/1000)};
+  tick();blockClock=setInterval(tick,1000);
+}
+function prepareBlock(level){
+  const title=currentGame==="tf"?"Verdadero o Falso":["","Trivia FO","Trivia CT","Trivia Gerencia"][level];
+  $("game").innerHTML=`<h2>${title}</h2><p>El tiempo empieza al pulsar Comenzar. Si ya iniciaste este bloque, continuará desde el inicio original.</p><p>Los aciertos mantienen su puntaje. Al completar el bloque obtienes hasta un 50 % adicional sobre esos puntos: bono completo hasta 2 minutos, que disminuye gradualmente hasta cero a los 10 minutos.</p><p class="muted">Salir o recargar no pausa el tiempo. Cada bloque y su bono puntúan una sola vez.</p><button id="beginBlock">Comenzar / continuar bloque</button>${backButton()}`;
+  $("beginBlock").onclick=()=>busy($("beginBlock"),()=>startQuestionSet(level));$("gameBack").onclick=closeGame;
+}
+function renderBlockResult(state){
+  stopBlockClock();
+  $("game").innerHTML=`<h2>¡Bloque terminado!</h2><p>Aciertos: ${Number(state.correct)} de ${Number(state.total)}.</p><p>Tiempo total: ${formatElapsed(state.elapsed_seconds)}.</p><p>Puntos por aciertos: <b>${Number(state.base_points)}</b>.</p><p>Bono por tiempo: <b>+${Number(state.bonus_points)}</b>.</p><p>Total del bloque: <b>${Number(state.base_points)+Number(state.bonus_points)} puntos</b>.</p>${state.bonus_eligible?"":'<p class="muted">Este bloque comenzó con el sistema anterior y conserva sus puntos por aciertos, sin bono retroactivo.</p>'}${backButton()}`;
+  $("gameBack").onclick=closeGame;
+}
+async function startQuestionSet(level){
   const game=currentGame,version=pageVersion;
-  if(!qs.length){gameError("No quedan preguntas pendientes en esta selección. Puede que ya las hayas respondido o que aún no se hayan publicado.");return}
+  const {data:state,error}=await db.rpc("start_block",{p_game:game,p_level:level});
+  if(version!==pageVersion || !participant)return;
+  if(error || !state){gameError("No se pudo iniciar el bloque. Intenta nuevamente.");return}
+  if(state.finished){renderBlockResult(state);await refreshScore();return}
+  const qs=state.questions||[];let index=0;
+  if(!qs.length){gameError("No hay preguntas disponibles en este bloque.");return}
   const render=()=>{
     const q=qs[index];selectedAnswer=null;
-    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA · "+["","FO","CT","GERENCIA"][q.level]}</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${index+1} de ${qs.length}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
+    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA · "+["","FO","CT","GERENCIA"][q.level]}</p><p class="muted">Tiempo del bloque: <b id="blockElapsed"></b> · Bono máximo: +50 %</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${Number(state.answered)+index+1} de ${Number(state.total)}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
+    // Retain the same original server anchor between questions.
+    const label=$("blockElapsed");label.textContent=formatElapsed(Number(state.elapsed_seconds)+(Date.now()-state.receivedAt)/1000);
     const submit=$("submitAnswer");let submitting=false;
     $("game").querySelectorAll("[data-answer]").forEach(b=>b.onclick=()=>{
       if(submitting)return;selectedAnswer=b.dataset.answer;
@@ -200,16 +224,17 @@ function startQuestionSet(level){
         if(version!==pageVersion || !participant)return;
         const duplicate=error && /ya respondiste/i.test(error.message||"");
         if(error && !duplicate){msg("answerMsg","No se pudo registrar la respuesta. Intenta nuevamente.");return}
-        if(!duplicate){answered++;if(data?.correct)correct++}
-        currentQuestions=currentQuestions.filter(question=>question.id!==q.id);
+        if(duplicate){await startQuestionSet(level);return}
         index++;await refreshScore();
         if(version!==pageVersion || !participant)return;
-        if(index<qs.length)render();
-        else {$("game").innerHTML=`<h2>¡Desafío terminado!</h2><p>Respuestas correctas en esta ronda: ${correct} de ${answered}.</p><p class="muted">Tu puntaje está actualizado.</p>${backButton()}`;$("gameBack").onclick=closeGame}
+        if(data?.block?.finished)renderBlockResult(data.block);
+        else if(index<qs.length)render();
+        else await startQuestionSet(level);
       }catch{if(version===pageVersion)msg("answerMsg",connectionMessage)}
       finally{submitting=false;submit.disabled=false}
     };
-  };render();
+  };
+  state.receivedAt=Date.now();render();startBlockClock(state);
 }
 const capturedPhotos=new Map();
 let cameraStream=null,cameraChallenge=null,cameraRequest=0;
