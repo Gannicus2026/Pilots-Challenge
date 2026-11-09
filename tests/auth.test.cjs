@@ -9,7 +9,7 @@ function app({hash='',search='',session=null,admin=false,from=null,rpc=null,auth
  const storage=new Map();let listener,updates=0,signouts=0;
  const db={auth:{onAuthStateChange:fn=>{listener=fn},getSession:async()=>({data:{session}}),getUser:async()=>({data:{user:session?.user}}),updateUser:async()=>{updates++;return{}},signOut:async()=>{signouts++;session=null;listener('SIGNED_OUT');return{}},resetPasswordForEmail:async()=>({})},rpc:async()=>({data:admin})};
  Object.assign(db.auth,auth);if(from)db.from=from;if(rpc)db.rpc=rpc;
- const context=vm.createContext({navigator:{mediaDevices},window:{addEventListener(){},supabase:{createClient:()=>db},scrollTo(){}},document:{addEventListener(){},getElementById:element,querySelectorAll:()=>[]},location:{hash,search,href:'https://example.test/Pilots-Challenge/'+search+hash,pathname:'/Pilots-Challenge/',origin:'https://example.test'},history:{replaceState(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},URL,URLSearchParams,console,confirm:()=>true,alert:()=>{}});
+ const context=vm.createContext({navigator:{mediaDevices},window:{addEventListener(){},supabase:{createClient:()=>db},scrollTo(){}},document:{addEventListener(){},getElementById:element,querySelectorAll:()=>[]},location:{hash,search,href:'https://example.test/Pilots-Challenge/'+search+hash,pathname:'/Pilots-Challenge/',origin:'https://example.test'},history:{replaceState(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},URL,URLSearchParams,setInterval:()=>1,clearInterval(){},console,confirm:()=>true,alert:()=>{}});
  vm.runInContext(source,context);
  return {element,run:code=>vm.runInContext(code,context),event:(e,s)=>listener(e,s),updates:()=>updates,signouts:()=>signouts};
 }
@@ -118,4 +118,24 @@ test('live camera capture stops the stream and enables evidence upload',async()=
  await a.run('openCamera("test")');assert.equal(requested.audio,false);assert.equal(upload.disabled,true);
  await shutter.onclick();assert.equal(drawn,1);assert.equal(stopped,1);assert.equal(upload.disabled,false);
  assert.equal(a.run('capturedPhotos.get("test").file.type'),'image/jpeg');
+});
+test('block starts through server RPC and shows persisted elapsed time',async()=>{
+ const calls=[];const state={questions:[{id:'q',game:'trivia',level:1,question:'Question',options:['One','Two','Three','Four']}],total:1,answered:0,elapsed_seconds:185,finished:false};
+ const a=app({rpc:async(name,args)=>{calls.push({name,args});return{data:state}}});
+ a.run('participant={id:"p"};currentGame="trivia"');await a.run('startQuestionSet(1)');
+ assert.equal(calls[0].name,'start_block');assert.equal(calls[0].args.p_level,1);
+ assert.equal(a.element('blockElapsed').textContent,'3:05');assert.match(a.element('game').innerHTML,/Tiempo del bloque/);
+});
+test('completion displays server bonus separately and does not calculate score in browser',async()=>{
+ const state={questions:[{id:'q',game:'tf',level:1,question:'Question',options:['Verdadero','Falso']}],total:1,answered:0,elapsed_seconds:0,finished:false};
+ const a=app({rpc:async name=>name==='start_block'?{data:state}:{data:{correct:true,points:10,block:{finished:true,correct:1,total:1,elapsed_seconds:93,base_points:10,bonus_points:5,bonus_eligible:true}}}});
+ a.run('participant={id:"p"};currentGame="tf";refreshScore=async()=>{}');await a.run('startQuestionSet(1)');
+ a.run('selectedAnswer="V"');await a.element('submitAnswer').onclick();
+ assert.match(a.element('game').innerHTML,/Bono por tiempo: <b>\+5/);assert.match(a.element('game').innerHTML,/15 puntos/);
+});
+test('leaving while a block request is pending does not reopen the game',async()=>{
+ let resolve;const a=app({rpc:()=>new Promise(r=>{resolve=r})});
+ a.run('participant={id:"p"};currentGame="trivia"');const pending=a.run('startQuestionSet(1)');a.run('closeGame()');
+ resolve({data:{finished:true,correct:1,total:1,base_points:10,bonus_points:5,elapsed_seconds:0}});await pending;
+ assert.equal(a.element('game').hidden,true);assert.doesNotMatch(a.element('game').innerHTML||'',/Bloque terminado/);
 });
