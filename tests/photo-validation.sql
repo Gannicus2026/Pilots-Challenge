@@ -4,7 +4,7 @@ insert into auth.users(id,email) values(gen_random_uuid(),'photo-test@example.in
 insert into public.participants(id,nickname,role) values(current_setting('pilots.photo_user')::uuid,'Photo test','FO');
 select set_config('request.jwt.claims',json_build_object('sub',current_setting('pilots.photo_user'),'role','authenticated','is_anonymous',true)::text,true);
 do $$
-declare c uuid;s jsonb;j jsonb;result jsonb;before_points integer;after_points integer;oldpath text;
+declare c uuid;s jsonb;j jsonb;result jsonb;before_points integer;after_points integer;oldpath text;i integer;
 begin
  insert into public.challenges(description,points,active) values('Transaction-only photo challenge',17,true) returning id into c;
  oldpath:=auth.uid()::text||'/'||gen_random_uuid()||'.jpg';s:=public.save_photo_submission(c,oldpath);
@@ -29,6 +29,13 @@ begin
  result:=public.finish_photo_review((j->>'token')::uuid,false,0,'Servicio temporalmente no disponible.',true);
  if result->>'status'<>'error' or(select status from public.submissions where id=(s->>'id')::uuid)<>'pending' then raise exception 'Infrastructure failure converted into acceptance';end if;
  if(select points from public.participants where id=auth.uid())<>before_points then raise exception 'Rejected/error photo changed score';end if;
+ -- Infrastructure failures must not force the participant to retake the same photo.
+ for i in 1..3 loop
+  update pilots_private.photo_reviews set created_at=clock_timestamp()-interval '20 seconds' where submission_id=(s->>'id')::uuid;
+  j:=public.claim_photo_review((s->>'id')::uuid,auth.uid());
+  if not(j ? 'token') then raise exception 'Saved photo became permanently blocked after provider errors';end if;
+  perform public.finish_photo_review((j->>'token')::uuid,false,0,'Provider failure.',true);
+ end loop;
  begin perform public.save_photo_submission(c,'other-user/'||gen_random_uuid()||'.jpg');raise exception 'Foreign photo path accepted';exception when raise_exception then if sqlerrm not ilike '%Ruta%' then raise;end if;end;
 end $$;
 set local role authenticated;

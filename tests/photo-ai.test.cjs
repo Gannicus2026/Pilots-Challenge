@@ -43,7 +43,7 @@ test('concurrent duplicate analysis does not call the provider twice',async()=>{
 });
 test('readiness probe checks provider availability without transmitting photos or secrets in the result',async()=>{
  const {createHandler}=await import('../supabase/functions/validate-photo/core.mjs');let calls=0;
- const handler=createHandler({env:name=>vars[name],fetchFn:async(url,options)=>{calls++;assert.match(url,/\/models\/gemini-2\.5-flash-lite$/);assert.equal(options.body,undefined);return Response.json({error:{status:'INVALID_ARGUMENT',details:[{reason:'API_KEY_INVALID'}]}},{status:400})}});
+ const handler=createHandler({env:name=>vars[name],fetchFn:async(url,options)=>{calls++;assert.match(url,/\/models\/gemini-3\.5-flash-lite$/);assert.equal(options.body,undefined);return Response.json({error:{status:'INVALID_ARGUMENT',details:[{reason:'API_KEY_INVALID'}]}},{status:400})}});
  const response=await handler(new Request('https://test/functions'));const data=await response.json();assert.equal(data.connection_ok,false);assert.equal(data.provider_code,'API_KEY_INVALID');assert.equal(JSON.stringify(data).includes('test-ai-key'),false);
  await handler(new Request('https://test/functions'));assert.equal(calls,1);
 });
