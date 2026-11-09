@@ -15,7 +15,9 @@ const show=(id)=>$(id).hidden=false, hide=(id)=>$(id).hidden=true;
 const msg=(id,s)=>$(id).textContent=s;
 function needConfig(){if(!db){alert("Falta configurar Supabase. Sigue los pasos del archivo README.");return false}return true}
 function resetScreen(){
-  pageVersion++;
+  pageVersion++;questionCache=[];challengeCache=[];
+  if(typeof $("qGame").onchange==="function")clearQuestion();
+  clearChallenge();$("newPasswordForm").reset();
   ["setup","participant","adminLogin","admin","game","passwordRecovery"].forEach(hide);
   participant=null; user=null; currentQuestions=[]; selectedAnswer=null; currentGame=null;
   msg("who", ""); msg("myScore", "0");
@@ -284,7 +286,7 @@ $("saveQuestion").onclick=()=>busy($("saveQuestion"),async()=>{
     clearQuestion();msg("qMsg","Pregunta guardada.");await loadAdmin();
   }catch{msg("qMsg",connectionMessage)}
 });
-function clearQuestion(){["qId","qText","optA","optB","optC","optD"].forEach(id=>$(id).value="");$("qPoints").value=10;$("qGame").value="trivia";$("qGame").onchange();$("qLevel").value="1";$("qActive").checked=true}
+function clearQuestion(){["qId","qText","optA","optB","optC","optD"].forEach(id=>$(id).value="");$("qPoints").value=10;$("qGame").value="trivia";$("qGame").onchange();$("qLevel").value="1";$("qCorrect").value="A";$("qActive").checked=true}
 $("clearQuestion").onclick=clearQuestion;
 function editQuestion(q){
   $("qId").value=q.id;$("qGame").value=q.game;$("qGame").onchange();$("qLevel").value=q.level;$("qText").value=q.question;$("qPoints").value=q.points;$("qCorrect").value=q.correct_answer;$("qActive").checked=q.active;
