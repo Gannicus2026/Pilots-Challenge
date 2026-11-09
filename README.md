@@ -64,3 +64,12 @@ La ventana de bono actual es de 3 a 15 minutos; los bloques ya terminados conser
 Pruebas: `node --test tests/auth.test.cjs tests/photo-ai.test.cjs`. Las pruebas de IA simulan al proveedor y no envían fotos reales. `tests/photo-validation.sql` verifica autorización y acreditación de puntos en una transacción que revierte sus registros de prueba.
 
 El estado GET distingue `ready` (configuración presente) y `connection_ok` (acceso de lectura al modelo). Ninguno garantiza la cuota de generación ni una foto validada. Los registros de fallos contienen únicamente etapa, estado HTTP y códigos de error; no contienen claves, imágenes ni respuestas del modelo.
+
+
+## Cierre temporal y reanudación del evento
+
+En el panel del organizador, **Apertura y cierre del juego** permite cerrar temporalmente y reanudar. Opcionalmente, indica una fecha y hora locales y guarda para programar el cierre automático. Sin una hora guardada, el cierre es manual. Reanudar conserva respuestas, fotografías y puntos, descuenta la pausa del tiempo de los bloques sin terminar y elimina el cierre anterior. El ranking continúa disponible y muestra que los puntos están congelados.
+
+El corte se aplica en Postgres, incluso a clientes antiguos, sin depender de que el navegador siga abierto ni de una tarea cron. Las operaciones de puntaje comparten un bloqueo del estado del evento; el cierre manual espera las transacciones anteriores. Los triggers impiden respuestas, cambios de evidencia y puntos tras el cierre. Una respuesta IA recibida durante la pausa conserva la evidencia y permite reintentar al reanudar, sin sumar puntos. Solo una cuenta de `admins` puede cambiar el estado mediante RPC. La tabla privada tiene RLS y ningún acceso directo desde el cliente. Los navegadores consultan el estado cada 15 segundos y antes de realizar acciones; el servidor verifica la hora en cada escritura.
+
+La migración ya aplicada se conserva en `migration_event_pause.sql`; no se debe ejecutar nuevamente. `tests/event-control.sql` comprueba permisos, corte programado, congelación de puntos, IA en curso y exclusión de la pausa del bono, y revierte sus datos de prueba.

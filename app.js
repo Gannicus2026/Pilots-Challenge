@@ -13,8 +13,68 @@ let user=null, participant=null, currentQuestions=[], selectedAnswer=null, curre
 const $=id=>document.getElementById(id);
 const show=(id)=>$(id).hidden=false, hide=(id)=>$(id).hidden=true;
 const msg=(id,s)=>$(id).textContent=s;
+let eventState=null,eventPaused=false,activeBlockState=null,activeBlockLevel=null,eventSyncing=false;
+function pausedError(error){return /EVENT_PAUSED/.test(error?.message||"")}
+function applyEventState(state){
+  eventState=state;eventPaused=state.paused===true;
+  const banner=$("eventBanner");banner.hidden=!eventPaused;
+  banner.textContent="Juego cerrado temporalmente. Los puntos y el progreso están congelados. Puedes consultar el ranking; el organizador puede reanudar el juego.";
+  $("eventAdminState").textContent=eventPaused?"CERRADO · puntajes congelados":state.closes_at?`ABIERTO · cierre automático: ${new Date(state.closes_at).toLocaleString()}`:"ABIERTO · sin cierre automático programado";
+  $("pauseEvent").disabled=eventPaused;$("resumeEvent").disabled=!eventPaused;$("scheduleEvent").disabled=eventPaused;
+  $("eventDue").textContent=eventPaused?"Closed":state.closes_at?`In ${Math.max(1,Math.ceil((new Date(state.closes_at)-new Date(state.server_now))/60000))} min`:"Sin programar";
+  const deadline=$("eventDeadline");
+  if(document.activeElement!==deadline){const d=state.closes_at?new Date(state.closes_at):null;deadline.value=d?new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16):""}
+  if(eventPaused){
+    stopCamera();stopBlockClock();
+    if(activeBlockState){const label=$("blockElapsed");if(label)label.textContent=formatElapsed(Number(activeBlockState.elapsed_seconds)+(new Date(state.paused_at)-new Date(activeBlockState.server_now))/1000)}
+  }
+  applyEventLock();
+}
+function applyEventLock(){
+  [...$("game").querySelectorAll("#beginBlock,#submitAnswer,[data-answer],[data-level],[data-camera],[data-shutter],[data-analyze],[data-save-photo]"),...$("pending").querySelectorAll("[data-approve],[data-reject]")].forEach(b=>{
+    if(eventPaused){if(b.dataset.eventDisabled===undefined)b.dataset.eventDisabled=String(b.disabled);b.disabled=true}
+    else if(b.dataset.eventDisabled!==undefined){b.disabled=b.dataset.eventDisabled==="true";delete b.dataset.eventDisabled}
+  });
+}
+async function refreshEventState(){
+  const id=user?.id;if(!id||!db)return null;
+  const {data,error}=await db.rpc("get_event_state");
+  if(user?.id!==id)return null;if(error)throw error;
+  if(!data||typeof data.paused!=="boolean")return null;
+  const resumed=eventPaused&&!data.paused;applyEventState(data);
+  if(resumed&&participant&&activeBlockState&&["trivia","tf"].includes(currentGame)){
+    const version=pageVersion,active=activeBlockState;
+    const {data:clock,error:clockError}=await db.rpc("start_block",{p_game:currentGame,p_level:activeBlockLevel});
+    if(!clockError&&clock&&!clock.finished&&version===pageVersion&&active===activeBlockState){Object.assign(active,{elapsed_seconds:clock.elapsed_seconds,server_now:clock.server_now,receivedAt:Date.now()});startBlockClock(active)}
+  }
+  return data;
+}
+async function ensureEventOpen(){
+  try{await refreshEventState();if(eventPaused){applyEventLock();return false}return true}
+  catch{const banner=$("eventBanner");banner.hidden=false;banner.textContent="No se pudo consultar el estado del juego. Reintenta cuando tengas conexión.";return false}
+}
+async function sendEventControl(action){
+  const button=$(action==="pause"?"pauseEvent":action==="resume"?"resumeEvent":"scheduleEvent");
+  await busy(button,async()=>{
+    try{
+      const raw=$("eventDeadline").value;const deadline=action==="schedule"&&raw?new Date(raw):null;
+      if(deadline&&(!Number.isFinite(deadline.getTime())||deadline<=new Date())){msg("eventControlMsg","Elige una fecha y hora futuras.");return}
+      const {data,error}=await db.rpc("control_event",{p_action:action,p_closes_at:deadline?deadline.toISOString():null});
+      if(error)throw error;applyEventState(data);
+      msg("eventControlMsg",action==="pause"?"Juego cerrado. Los puntajes quedan congelados.":action==="resume"?"Juego reanudado desde el progreso guardado.":deadline?"Cierre automático programado.":"Cierre automático eliminado.");
+      await loadAdminRanking();
+    }catch{msg("eventControlMsg","No se pudo cambiar el estado. Actualiza el panel e inténtalo de nuevo.")}
+  });
+  try{await refreshEventState()}catch{}
+}
+$("pauseEvent").onclick=()=>sendEventControl("pause");$("resumeEvent").onclick=()=>sendEventControl("resume");$("scheduleEvent").onclick=()=>sendEventControl("schedule");
+setInterval(async()=>{
+ if(!user||eventSyncing||document.hidden)return;eventSyncing=true;
+ try{const wasPaused=eventPaused;await refreshEventState();if(participant&&eventPaused&&currentGame==="ranking"&&!$("game").hidden)await renderRanking();if(!$("admin").hidden&&(eventPaused||wasPaused))await loadAdminRanking()}catch{}finally{eventSyncing=false}
+},15000);
 function needConfig(){if(!db){alert("Falta configurar Supabase. Sigue los pasos del archivo README.");return false}return true}
 function resetScreen(){
+  eventState=null;eventPaused=false;activeBlockState=null;activeBlockLevel=null;$("eventBanner").hidden=true;
   photoConsent=false;stopBlockClock();stopCamera();capturedPhotos.clear();pageVersion++;questionCache=[];challengeCache=[];
   if(typeof $("qGame").onchange==="function")clearQuestion();
   clearChallenge();$("newPasswordForm").reset();
@@ -129,12 +189,12 @@ async function loadParticipant(){
   if(user?.id!==id)return;
   if(error)throw error;
   if(data){participant=data;hide("setup");show("participant");hide("adminLogin");hide("admin");
-    msg("hello",`¡Vamos, ${data.nickname}!`);msg("who",`${data.nickname} · ${data.role}`);msg("myScore",data.points);updateAssignmentProgress()}
+    msg("hello",`¡Vamos, ${data.nickname}!`);msg("who",`${data.nickname} · ${data.role}`);msg("myScore",data.points);updateAssignmentProgress();refreshEventState().catch(()=>{})}
 }
 async function refreshScore(){
   const id=user?.id;if(!participant || !id)return;
   const {data}=await db.from("participants").select("points").eq("id",id).single();
-  if(data && participant?.id===id){participant.points=data.points;msg("myScore",data.points);updateAssignmentProgress()}
+  if(data && participant?.id===id){participant.points=data.points;msg("myScore",data.points);updateAssignmentProgress();refreshEventState().catch(()=>{})}
 }
 $("join").onclick=()=>busy($("join"),async()=>{
   if(!needConfig())return;
@@ -153,7 +213,7 @@ $("join").onclick=()=>busy($("join"),async()=>{
     await loadParticipant();msg("setupMsg","");
   }catch{msg("setupMsg",connectionMessage)}
 });
-function closeGame(){stopBlockClock();stopCamera();pageVersion++;hide("game");updateAssignmentProgress()}
+function closeGame(){activeBlockState=null;stopBlockClock();stopCamera();pageVersion++;hide("game");updateAssignmentProgress()}
 document.querySelectorAll(".tile").forEach(button=>button.onclick=()=>{openPage(button.dataset.page,Number(button.dataset.level)||0);$("game").scrollIntoView?.({behavior:"smooth",block:"start"})});
 $("assignmentsNav").onclick=()=>{closeGame();$("assignmentsTitle").scrollIntoView?.({behavior:"smooth"})};
 $("reportNav").onclick=()=>{openPage("ranking");$("game").scrollIntoView?.({behavior:"smooth",block:"start"})};
@@ -184,9 +244,11 @@ function backButton(id="gameBack"){return `<button class="secondary" id="${id}">
 function gameError(text){$("game").innerHTML=`<p role="status">${escapeHtml(text)}</p>${backButton()}`;$("gameBack").onclick=closeGame}
 async function openPage(page,chosenLevel=0){
   if(!participant || !needConfig())return;
-  stopBlockClock();stopCamera();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
+  activeBlockState=null;stopBlockClock();stopCamera();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
   try{
-    if(page==="ranking"){await renderRanking();await refreshScore();return}
+    if(page==="ranking"){try{await refreshEventState()}catch{}await renderRanking();await refreshScore();return}
+    if(!await ensureEventOpen()){gameError("El juego está cerrado temporalmente. Tus puntos y tu progreso se conservan. Puedes consultar Completion Report para ver el ranking.");return}
+    if(version!==pageVersion||!participant)return;
     if(page==="objects"){await renderChallenges();return}
     if(!["trivia","tf"].includes(page))return;
     const id=user.id;
@@ -210,6 +272,7 @@ let blockClock=null;
 function stopBlockClock(){if(blockClock!==null)clearInterval(blockClock);blockClock=null}
 function formatElapsed(seconds){const n=Math.max(0,Math.floor(Number(seconds)||0));return `${Math.floor(n/60)}:${String(n%60).padStart(2,"0")}`}
 function startBlockClock(state){
+  activeBlockState=state;
   stopBlockClock();const anchor=Date.now(),elapsed=Number(state.elapsed_seconds)||0;
   const tick=()=>{const label=$("blockElapsed");if(label)label.textContent=formatElapsed(elapsed+(Date.now()-anchor)/1000)};
   tick();blockClock=setInterval(tick,1000);
@@ -220,14 +283,17 @@ function prepareBlock(level){
   $("beginBlock").onclick=()=>busy($("beginBlock"),()=>startQuestionSet(level));$("gameBack").onclick=closeGame;
 }
 function renderBlockResult(state){
+  activeBlockState=null;
   stopBlockClock();
   $("game").innerHTML=`<h2>¡Bloque terminado!</h2><p>Aciertos: ${Number(state.correct)} de ${Number(state.total)}.</p><p>Tiempo total: ${formatElapsed(state.elapsed_seconds)}.</p><p>Puntos por aciertos: <b>${Number(state.base_points)}</b>.</p><p>Bono por tiempo: <b>+${Number(state.bonus_points)}</b>.</p><p>Total del bloque: <b>${Number(state.base_points)+Number(state.bonus_points)} puntos</b>.</p>${state.bonus_eligible?"":'<p class="muted">Este bloque comenzó con el sistema anterior y conserva sus puntos por aciertos, sin bono retroactivo.</p>'}${backButton()}`;
   $("gameBack").onclick=closeGame;
 }
 async function startQuestionSet(level){
+  const requestedVersion=pageVersion,requestedUser=user?.id;if(!await ensureEventOpen()||requestedVersion!==pageVersion||requestedUser!==user?.id)return;activeBlockLevel=level;
   const game=currentGame,version=pageVersion;
   const {data:state,error}=await db.rpc("start_block",{p_game:game,p_level:level});
   if(version!==pageVersion || !participant)return;
+  if(pausedError(error)){await refreshEventState();return}
   if(error || !state){gameError("No se pudo iniciar el bloque. Intenta nuevamente.");return}
   if(state.finished){renderBlockResult(state);await refreshScore();return}
   const qs=state.questions||[];let index=0;
@@ -235,6 +301,7 @@ async function startQuestionSet(level){
   const render=()=>{
     const q=qs[index];selectedAnswer=null;
     $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA NIVEL "+["","FO","CT","GERENCIA"][q.level]}</p><p class="muted">Tiempo del bloque: <b id="blockElapsed"></b> · Bono máximo: +50 %</p><h2>${escapeHtml(q.question)}</h2><div class="question-progress" role="progressbar" aria-label="Progreso del bloque" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round((Number(state.answered)+index)/Number(state.total)*100)}"><i style="width:${Math.round((Number(state.answered)+index)/Number(state.total)*100)}%"></i></div><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${Number(state.answered)+index+1} de ${Number(state.total)}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
+    applyEventLock();
     // Retain the same original server anchor between questions.
     const label=$("blockElapsed");label.textContent=formatElapsed(Number(state.elapsed_seconds)+(Date.now()-state.receivedAt)/1000);
     const submit=$("submitAnswer");let submitting=false;
@@ -244,11 +311,12 @@ async function startQuestionSet(level){
     });
     $("gameBack").onclick=closeGame;
     submit.onclick=async()=>{
-      if(submitting || selectedAnswer===null)return;submitting=true;submit.disabled=true;
+      if(submitting || selectedAnswer===null)return;if(!await ensureEventOpen()||version!==pageVersion||!participant||submitting)return;submitting=true;submit.disabled=true;
       try{
         const {data,error}=await db.rpc("submit_answer",{p_question_id:q.id,p_answer:selectedAnswer});
         if(version!==pageVersion || !participant)return;
         const duplicate=error && /ya respondiste/i.test(error.message||"");
+        if(pausedError(error)){await refreshEventState();return}
         if(error && !duplicate){msg("answerMsg","No se pudo registrar la respuesta. Intenta nuevamente.");return}
         if(duplicate){await startQuestionSet(level);return}
         index++;await refreshScore();
@@ -274,6 +342,7 @@ function stopCamera(){
 }
 function photoMsg(id,text){const target=$(id);if(target)target.textContent=text}
 async function openCamera(challengeId){
+  const requestedVersion=pageVersion;if(!await ensureEventOpen()||requestedVersion!==pageVersion)return;
   const feedback=`upload-${challengeId}`;
   if(!photoConsent){photoMsg(feedback,"Autoriza el análisis por Google Gemini antes de tomar la foto.");return}
   if(capturedPhotos.has(challengeId)){photoMsg(feedback,"Esta foto ya fue capturada. Espera a que se guarde o reintenta el guardado.");return}
@@ -346,6 +415,7 @@ async function renderChallenges(){
   $("refreshPhotos").onclick=()=>busy($("refreshPhotos"),()=>renderChallenges());$("gameBack").onclick=closeGame;
 }
 async function analyzeEvidence(submissionId,challengeId,uiVersion=pageVersion){
+  if(!await ensureEventOpen())return;
   const version=uiVersion,id=user?.id,feedback=`upload-${challengeId}`;
   if(!photoConsent){if(version===pageVersion)photoMsg(feedback,"Autoriza el análisis por Google Gemini.");return}
   if(!photoAIReady){photoMsg(feedback,"El organizador debe activar la validación IA. La foto está guardada.");return}
@@ -360,6 +430,7 @@ async function analyzeEvidence(submissionId,challengeId,uiVersion=pageVersion){
   }catch{if(version===pageVersion&&user?.id===id)photoMsg(feedback,"No se pudo completar la validación IA. La foto sigue guardada; puedes reintentar.")}
 }
 async function uploadEvidence(challengeId,capture=capturedPhotos.get(challengeId)){
+  if(!await ensureEventOpen())return;
   const f=capture?.file,feedback=`upload-${challengeId}`,id=user?.id,version=pageVersion;
   if(!f){photoMsg(feedback,"Toma una fotografía con la cámara.");return}
   if(capture.uploading)return;
@@ -390,7 +461,7 @@ async function renderRanking(){
   const {data,error}=await query;if(version!==pageVersion)return;
   if(error){gameError("No se pudo cargar el ranking. Intenta nuevamente.");return}
   const rows=sortRanking(data||[]);
-  $("game").innerHTML='<h2>Ranking de la tripulación</h2><p class="muted">Los empates comparten posición.</p><label>Mostrar<select id="rankRole"><option value="">General</option><option value="FO">FO</option><option value="CT">CT</option></select></label><button class="secondary" id="refreshRanking">Actualizar ranking</button><table><thead><tr><th>#</th><th>Pseudónimo</th><th>Cargo</th><th>Puntos</th></tr></thead><tbody>'+rows.map((p,i)=>`<tr><td>${rows.findIndex(other=>other.points===p.points)+1}</td><td>${escapeHtml(p.nickname)}</td><td><span class="tag">${escapeHtml(p.role)}</span></td><td><b>${p.points}</b></td></tr>`).join("")+`</tbody></table>${!rows.length?'<p class="muted">Sin participantes todavía.</p>':""}${backButton()}`;
+  $("game").innerHTML='<h2>Ranking de la tripulación</h2><p class="muted">Los empates comparten posición.</p>'+(eventPaused?'<p class="frozen-note">Juego cerrado · puntajes congelados</p>':" ")+'<label>Mostrar<select id="rankRole"><option value="">General</option><option value="FO">FO</option><option value="CT">CT</option></select></label><button class="secondary" id="refreshRanking">Actualizar ranking</button><table><thead><tr><th>#</th><th>Pseudónimo</th><th>Cargo</th><th>Puntos</th></tr></thead><tbody>'+rows.map((p,i)=>`<tr><td>${rows.findIndex(other=>other.points===p.points)+1}</td><td>${escapeHtml(p.nickname)}</td><td><span class="tag">${escapeHtml(p.role)}</span></td><td><b>${p.points}</b></td></tr>`).join("")+`</tbody></table>${!rows.length?'<p class="muted">Sin participantes todavía.</p>':""}${backButton()}`;
   $("rankRole").value=rankRole;$("rankRole").onchange=()=>{rankRole=$("rankRole").value;renderRanking().catch(()=>gameError(connectionMessage))};
   $("refreshRanking").onclick=()=>busy($("refreshRanking"),async()=>{await renderRanking();await refreshScore()});$("gameBack").onclick=closeGame;
 }
@@ -447,6 +518,7 @@ async function toggleActive(table,id,active){
   catch{msg("adminStatus","No se pudo cambiar la disponibilidad. Intenta nuevamente.")}
 }
 async function loadAdmin(){
+  try{await refreshEventState()}catch{msg("eventAdminState","No se pudo consultar el estado. Actualiza el panel.")}
   const id=user?.id;if(!id)return;
   const [questions,challenges]=await Promise.all([db.from("questions").select("*").order("created_at",{ascending:false}),db.from("challenges").select("*").order("created_at",{ascending:false})]);
   if(user?.id!==id || $("admin").hidden)return;
@@ -472,7 +544,7 @@ async function loadPending(){
   if(user?.id!==id || $("admin").hidden)return;
   const el=$("pending");el.innerHTML=rows.map(s=>`<div class="submission"><b>${escapeHtml(s.nickname)} (${escapeHtml(s.role)})</b><p>${escapeHtml(s.description)}</p>${s.photo_url?`<img class="photo" src="${escapeHtml(s.photo_url)}" alt="Evidencia enviada">`:'<p class="msg">No se pudo abrir la imagen. Actualiza el panel para reintentar.</p>'}<button data-approve="${s.id}" ${s.photo_url?"":"disabled"}>Aprobar (+${s.points})</button><button class="secondary" data-reject="${s.id}">Rechazar</button><span class="msg" id="review-${s.id}" role="status"></span></div>`).join("")||'<p class="muted">No hay evidencias pendientes.</p>';
   el.querySelectorAll("[data-approve]").forEach(b=>b.onclick=()=>busy(b,()=>review(b.dataset.approve,true)));
-  el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>busy(b,()=>review(b.dataset.reject,false)));
+  el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=()=>busy(b,()=>review(b.dataset.reject,false)));applyEventLock();
 }
 async function review(id,approved){
   try{const {error}=await db.rpc("review_submission",{p_submission_id:id,p_approved:approved});if(error)throw error;await Promise.all([loadPending(),loadAdminRanking()])}
@@ -483,6 +555,6 @@ async function loadAdminRanking(){
   if(user?.id!==id || $("admin").hidden)return;
   if(error){msg("adminRanking","No se pudo cargar el ranking. Actualiza el panel.");return}
   const rows=sortRanking(data||[]);
-  $("adminRanking").innerHTML=rows.map(p=>`<div class="rankrow"><span>${rows.findIndex(other=>other.points===p.points)+1}. ${escapeHtml(p.nickname)} <span class="tag">${escapeHtml(p.role)}</span></span><b>${p.points}</b></div>`).join("")||'<p class="muted">Sin participantes todavía.</p>';
+  $("adminRanking").innerHTML=(eventPaused?'<p class="frozen-note">Juego cerrado · puntajes congelados</p>':"")+rows.map(p=>`<div class="rankrow"><span>${rows.findIndex(other=>other.points===p.points)+1}. ${escapeHtml(p.nickname)} <span class="tag">${escapeHtml(p.role)}</span></span><b>${p.points}</b></div>`).join("")||'<p class="muted">Sin participantes todavía.</p>';
 }
 if(configured)session();

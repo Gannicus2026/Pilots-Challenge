@@ -4,13 +4,14 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#494d56"><title>FOPaT · FO FLOOR PAY</title>
-  <link rel="stylesheet" href="styles.css?v=fopat-20261109">
+  <link rel="stylesheet" href="styles.css?v=fopat-event-control-20261109">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0" integrity="sha384-gnyZit14c5lnGcarmA166QQjjJXpucw25ogZXuwH3HxxY904zHkBqmxVpelsPorb" crossorigin="anonymous"></script>
 </head>
 <body>
 <header class="top"><div class="brand"><span class="brand-symbol" aria-hidden="true">✈</span><div>FOPaT<small>FO FLOOR PAY</small></div></div><div id="who" class="who"></div></header>
 <div class="sky-banner" aria-hidden="true"></div>
 <main>
+  <p id="eventBanner" class="event-banner" role="status" hidden></p>
   <section id="setup" class="panel narrow">
     <div class="login-brand"><span class="brand-symbol" aria-hidden="true">✈</span><div>FOPaT<small>FO FLOOR PAY</small></div></div><h1>FO FLOOR PAY</h1><p class="login-subtitle">Participant Panel</p>
     <p class="muted">Usa un pseudónimo. No necesitas instalar nada.</p>
@@ -23,7 +24,7 @@
     <nav class="portal-nav" aria-label="Navegación principal"><button class="nav-current" id="assignmentsNav">Assignments</button><button id="reportNav">Completion Report</button><button id="libraryNav">Library</button></nav>
     <div class="portal-heading"><div><p class="eyebrow">FO FLOOR PAY · PARTICIPANT PANEL</p><h1 id="hello">¡A jugar!</h1></div><div class="score"><small>TU PUNTAJE</small><strong id="myScore">0</strong></div></div>
     <details id="eventRules" class="rules"><summary>Bases e instrucciones</summary><p>Elige los desafíos que quieras. Todos pueden jugar cualquier nivel de trivia, sin importar si son FO o CT. Puedes volver al menú cuando quieras. En los desafíos de fotos solo cuentan los artículos que tú mismo portes o las prendas que lleves puestas; no se aceptan artículos de otras personas ni prestados para completar el desafío.</p></details>
-    <section class="assignments-panel" aria-labelledby="assignmentsTitle"><div class="assignment-heading"><h2 id="assignmentsTitle">New Assignments</h2><span class="due-label">DUE TIME <b>In 1 hour</b></span></div>
+    <section class="assignments-panel" aria-labelledby="assignmentsTitle"><div class="assignment-heading"><h2 id="assignmentsTitle">New Assignments</h2><span class="due-label">DUE TIME <b id="eventDue">Sin programar</b></span></div>
     <div class="assignment-box"><div class="assignment-stripe" aria-hidden="true">✳</div><div class="assignment-content"><div class="assignment-tabs"><button id="activeAssignments" class="is-active">Active Assignments</button><button id="completedAssignments">Completed Assignments</button></div><p id="assignmentNotice" class="assignment-notice" role="status">Elige un ítem para abrir sus desafíos debajo de este recuadro.</p><div class="tiles">
 <button class="tile" data-key="fo" data-page="trivia" data-level="1"><span class="assignment-icon" aria-hidden="true">▤</span><span class="tile-copy"><span>Trivia Nivel FO</span><small>Complejidad media a baja</small><span class="assignment-progress" role="progressbar" aria-label="Progreso de Trivia Nivel FO" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></span><small class="progress-count">—</small></button>
 <button class="tile" data-key="ct" data-page="trivia" data-level="2"><span class="assignment-icon" aria-hidden="true">▤</span><span class="tile-copy"><span>Trivia Nivel CT</span><small>Preguntas específicas y difíciles</small><span class="assignment-progress" role="progressbar" aria-label="Progreso de Trivia Nivel CT" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i></i></span></span><small class="progress-count">—</small></button>
@@ -58,6 +59,7 @@
   <section id="admin" hidden>
     <button id="adminSignOut" class="secondary">Cerrar sesión de administrador</button>
     <div class="panel"><p class="eyebrow">CONTROL DEL EVENTO</p><h1>Panel del organizador</h1><p class="muted">Crea y modifica preguntas, publica desafíos y revisa evidencias.</p></div>
+    <section class="panel event-control"><h2>Apertura y cierre del juego</h2><p id="eventAdminState" role="status">Consultando estado…</p><p>Al cerrar se congelan los puntos y el tiempo de los bloques en curso. El ranking sigue disponible. Al reanudar se conserva todo el progreso.</p><button id="pauseEvent" class="danger" disabled>Cerrar juego temporalmente</button><button id="resumeEvent" disabled>Reanudar juego</button><label>Cierre automático (hora local de este dispositivo)<input id="eventDeadline" type="datetime-local"></label><button id="scheduleEvent" class="secondary">Guardar hora de cierre</button><small>Deja la fecha vacía y guarda para quitar un cierre programado. Reanudar también elimina el cierre anterior.</small><p id="eventControlMsg" class="msg" role="status"></p></section>
     <section class="panel"><h2>Estado del contenido</h2><p id="contentSummary" class="muted"></p><button id="refreshAdmin" class="secondary">Actualizar panel</button><p id="adminStatus" class="msg" role="status"></p></section>
     <div class="adminGrid">
       <section class="panel"><h2>Crear / editar pregunta</h2>
@@ -90,5 +92,5 @@
   </section>
 </main>
 <footer><button id="adminLink" class="linkbtn">Acceso organizador</button><span> · FOPaT · FO FLOOR PAY</span></footer>
-<script src="app.js?v=fopat-20261109"></script>
+<script src="app.js?v=fopat-event-control-20261109"></script>
 </body></html>
