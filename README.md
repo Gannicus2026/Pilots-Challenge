@@ -25,7 +25,7 @@ La aplicación conserva el proyecto y los datos actuales. Los tres niveles de tr
 - Preguntas: completa las cuatro alternativas de trivia, la respuesta correcta, nivel y puntos de 1 a 1000. Para Verdadero/Falso las alternativas se completan automáticamente. Las alternativas se guardan como una lista, compatible con el esquema instalado.
 - Disponibilidad: activa o desactiva preguntas y desafíos; desactivarlos conserva sus intentos, evidencias y puntajes.
 - Progreso: al volver a un juego se omiten las preguntas ya respondidas. El servidor impide puntuar dos veces por la misma pregunta.
-- Evidencias: captura en vivo con `getUserMedia`, vista previa y repetición, sin selector de galería; JPEG de hasta 5 MB; estados pendiente, aprobada y rechazada. Se permite una evidencia por participante y desafío. Las fotos siguen en un bucket privado y el organizador accede con enlaces temporales. Usa **Actualizar panel** si venció una imagen.
+- Evidencias: captura en vivo con `getUserMedia`, guardado automático y bloqueo del botón al capturar, sin selector de galería; JPEG de hasta 5 MB. Se puede salir y volver al ítem, sin cronómetro. El estado completado y su puntaje vienen del servidor. Se permite una evidencia por participante y desafío. Las fotos siguen en un bucket privado y el organizador accede con enlaces temporales. Usa **Actualizar panel** si venció una imagen.
 - Ranking: vistas General, FO y CT, actualización manual y posiciones compartidas en empates.
 - Invitados: descarga el QR desde el panel, imprime y comparte. `entry-qr.svg` apunta únicamente a la URL pública de GitHub Pages y no depende de un servicio de QR externo.
 
@@ -39,12 +39,26 @@ Las vistas públicas exponen solamente preguntas activas sin respuesta correcta 
 
 `node --test tests/auth.test.cjs` verifica recuperación, registro por RPC, doble toque, formatos de opciones, edición, validaciones y ranking. `tests/security.sql` comprueba los permisos y el puntaje con una transacción que revierte todos los datos de prueba. Ejecuta esa prueba desde una conexión administrativa y conserva el `rollback` final.
 
-Los nombres FO, CT y Gerencia son niveles de trivia de libre elección; el cargo del registro sigue siendo FO/CT. La cámara se apaga al capturar, cancelar, cambiar de pantalla o dejar la pestaña. Se requiere HTTPS y permiso de cámara. Esta restricción evita la galería en la interfaz; un cliente manipulado no permite certificar criptográficamente la procedencia de la imagen.
+Los nombres FO, CT y Gerencia son niveles de trivia de libre elección; el cargo del registro sigue siendo FO/CT. Los niveles se muestran como Trivia Nivel FO, Trivia Nivel CT y Trivia Nivel Gerencia; todos los participantes pueden jugar cualquiera, con independencia del cargo del registro. La cámara se apaga al capturar, cancelar, cambiar de pantalla o dejar la pestaña. Se requiere HTTPS y permiso de cámara. Esta restricción evita la galería en la interfaz; un cliente manipulado no permite certificar criptográficamente la procedencia de la imagen.
 
 ## Puntaje por tiempo del bloque
 
 FO, CT, Gerencia y Verdadero/Falso se cronometran por separado. El servidor guarda el comienzo al pulsar Comenzar; salir, recargar o volver al menú no pausa ni reinicia el tiempo. Las preguntas de ese bloque quedan fijadas al comenzar.
 
-Cada acierto mantiene su valor. Al responder la última pregunta se agrega una sola vez `floor(puntos_por_aciertos × 0.5 × clamp((180 − segundos) / 150, 0, 1))`: hasta 30 segundos, +50 %; a 1 minuto y 45 segundos, +25 %; desde los 3 minutos, sin bono. El bono no afecta a desafíos fotográficos. Cero aciertos da cero bono. El reloj del dispositivo solo sirve para mostrar el tiempo; el servidor calcula el puntaje.
+Cada acierto mantiene su valor. Al responder la última pregunta se agrega una sola vez `floor(puntos_por_aciertos × 0.5 × clamp((900 − segundos) / 720, 0, 1))`: hasta 3 minutos, +50 %; a los 9 minutos, +25 %; desde los 15 minutos, sin bono. El bono no afecta a desafíos fotográficos. Cero aciertos da cero bono. El reloj del dispositivo solo sirve para mostrar el tiempo; el servidor calcula el puntaje.
 
 Las sesiones iniciadas mediante clientes antiguos conservan sus puntos y no reciben bonos retroactivos. Las tablas de cronometraje y sus preguntas con clave están en el esquema privado `pilots_private`, con RLS y sin acceso directo de participantes. Las funciones públicas usan wrappers sin privilegios elevados y las funciones privadas validan la identidad y serializan los cambios por participante.
+
+## Validación de fotografías por IA — preparada, pendiente de autorización
+
+La función desplegada actualmente es `supabase/functions/validate-photo/index.ts`: informa que la validación IA no está activada y rechaza todas las solicitudes de análisis. No descarga fotos ni las envía a Google. Las evidencias anteriores se conservan y las nuevas fotos se guardan automáticamente; todavía no ganan puntos automáticos por IA. La revisión del organizador existente se conserva como alternativa.
+
+La integración completa está preparada en `prepared-index.ts` y `core.mjs`, pero NO está activada. Antes de desplegarla se necesita autorización expresa del propietario para enviar a Google Gemini la foto y la descripción del desafío. El participante también debe aceptar ese análisis antes de capturar o validar. La app pide fotografiar el objeto o la prenda sin caras ni documentos personales. La API gratuita de Google tiene cupos y sus condiciones pueden permitir el uso del contenido para mejorar sus servicios; comprobar las condiciones y el plan elegido antes de activarla.
+
+Tras la autorización, guardar `GEMINI_API_KEY` en **Supabase > Edge Functions > Secrets**, nunca en GitHub ni en el chat, y configurar `PHOTO_AI_ENABLED=true`. El modelo por defecto es `gemini-2.5-flash-lite`; se puede seleccionar otro modelo compatible con `GEMINI_MODEL`. Las claves de Supabase del servidor se leen de las variables automáticas del entorno, sin incluirlas en archivos públicos. No es necesario cambiar la base de datos, usuarios ni evidencias para conectar la clave.
+
+La integración verifica la sesión con Supabase Auth antes de analizar. Descarga solo el archivo privado del participante, verifica tamaño y formato, y usa un resultado estructurado del modelo. El cliente no decide si se acepta ni cuántos puntos entregar. Solo el servidor puede cerrar una validación y acreditar una vez los puntos. Los errores de red, cuota o modelo conservan la foto y no aprueban evidencia. Una foto rechazada se puede repetir. Hay límites de intentos y exclusión de solicitudes simultáneas.
+
+La ventana de bono actual es de 3 a 15 minutos; los bloques ya terminados conservan sus resultados. Las migraciones `add_secure_photo_ai_validation_and_event_revisions` y `fix_photo_review_reason_variable` están registradas en Supabase.
+
+Pruebas: `node --test tests/auth.test.cjs tests/photo-ai.test.cjs`. Las pruebas de IA simulan al proveedor y no envían fotos reales. `tests/photo-validation.sql` verifica autorización y acreditación de puntos en una transacción que revierte sus registros de prueba.

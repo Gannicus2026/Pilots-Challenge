@@ -15,7 +15,7 @@ const show=(id)=>$(id).hidden=false, hide=(id)=>$(id).hidden=true;
 const msg=(id,s)=>$(id).textContent=s;
 function needConfig(){if(!db){alert("Falta configurar Supabase. Sigue los pasos del archivo README.");return false}return true}
 function resetScreen(){
-  stopBlockClock();stopCamera();capturedPhotos.clear();pageVersion++;questionCache=[];challengeCache=[];
+  photoConsent=false;stopBlockClock();stopCamera();capturedPhotos.clear();pageVersion++;questionCache=[];challengeCache=[];
   if(typeof $("qGame").onchange==="function")clearQuestion();
   clearChallenge();$("newPasswordForm").reset();
   ["setup","participant","adminLogin","admin","game","passwordRecovery"].forEach(hide);
@@ -153,13 +153,13 @@ $("join").onclick=()=>busy($("join"),async()=>{
     await loadParticipant();msg("setupMsg","");
   }catch{msg("setupMsg",connectionMessage)}
 });
-function closeGame(){stopBlockClock();stopCamera();capturedPhotos.clear();pageVersion++;hide("game")}
+function closeGame(){stopBlockClock();stopCamera();pageVersion++;hide("game")}
 document.querySelectorAll(".tile").forEach(button=>button.onclick=()=>openPage(button.dataset.page));
 function backButton(id="gameBack"){return `<button class="secondary" id="${id}">Volver al menú</button>`}
 function gameError(text){$("game").innerHTML=`<p role="status">${escapeHtml(text)}</p>${backButton()}`;$("gameBack").onclick=closeGame}
 async function openPage(page){
   if(!participant || !needConfig())return;
-  stopBlockClock();stopCamera();capturedPhotos.clear();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
+  stopBlockClock();stopCamera();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
   try{
     if(page==="ranking"){await renderRanking();await refreshScore();return}
     if(page==="objects"){await renderChallenges();return}
@@ -174,7 +174,7 @@ async function openPage(page){
     const answered=new Set((attempts.data||[]).map(a=>a.question_id));
     currentQuestions=questions.data||[];
     if(page==="trivia"){
-      $("game").innerHTML='<h2>Elige tu nivel</h2><p class="muted">Puedes jugar los tres niveles. Cada pregunta puntúa una sola vez.</p><div class="answers">'+["FO","CT","Gerencia"].map((label,i)=>`<button data-level="${i+1}">${label} · ${currentQuestions.filter(q=>q.level===i+1 && !answered.has(q.id)).length} pendientes</button>`).join("")+`</div>${backButton()}`;
+      $("game").innerHTML='<h2>Elige el nivel de trivia</h2><p class="muted">Los nombres indican la dificultad. Todos pueden jugar Trivia Nivel FO, Trivia Nivel CT y Trivia Nivel Gerencia, sin importar el cargo registrado. Cada bloque puntúa una sola vez.</p><div class="answers">'+["FO","CT","Gerencia"].map((label,i)=>`<button data-level="${i+1}">Trivia Nivel ${label} · ${currentQuestions.filter(q=>q.level===i+1 && !answered.has(q.id)).length} pendientes</button>`).join("")+`</div>${backButton()}`;
       $("game").querySelectorAll("[data-level]").forEach(b=>b.onclick=()=>prepareBlock(Number(b.dataset.level)));
       $("gameBack").onclick=closeGame;
     }else prepareBlock(1);
@@ -189,8 +189,8 @@ function startBlockClock(state){
   tick();blockClock=setInterval(tick,1000);
 }
 function prepareBlock(level){
-  const title=currentGame==="tf"?"Verdadero o Falso":["","Trivia FO","Trivia CT","Trivia Gerencia"][level];
-  $("game").innerHTML=`<h2>${title}</h2><p>El tiempo empieza al pulsar Comenzar. Si ya iniciaste este bloque, continuará desde el inicio original.</p><p>Los aciertos mantienen su puntaje. Al completar el bloque obtienes hasta un 50 % adicional sobre esos puntos: bono completo hasta 30 segundos, que disminuye gradualmente hasta cero a los 3 minutos.</p><p class="muted">Salir o recargar no pausa el tiempo. Cada bloque y su bono puntúan una sola vez.</p><button id="beginBlock">Comenzar / continuar bloque</button>${backButton()}`;
+  const title=currentGame==="tf"?"Verdadero o Falso":["","Trivia Nivel FO","Trivia Nivel CT","Trivia Nivel Gerencia"][level];
+  $("game").innerHTML=`<h2>${title}</h2><p>El tiempo empieza al pulsar Comenzar. Si ya iniciaste este bloque, continuará desde el inicio original.</p><p>Los aciertos mantienen su puntaje. Al completar el bloque obtienes hasta un 50 % adicional sobre esos puntos: bono completo hasta 3 minutos, que disminuye gradualmente hasta cero a los 15 minutos.</p><p class="muted">Salir o recargar no pausa el tiempo. Cada bloque y su bono puntúan una sola vez.</p><button id="beginBlock">Comenzar / continuar bloque</button>${backButton()}`;
   $("beginBlock").onclick=()=>busy($("beginBlock"),()=>startQuestionSet(level));$("gameBack").onclick=closeGame;
 }
 function renderBlockResult(state){
@@ -208,7 +208,7 @@ async function startQuestionSet(level){
   if(!qs.length){gameError("No hay preguntas disponibles en este bloque.");return}
   const render=()=>{
     const q=qs[index];selectedAnswer=null;
-    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA · "+["","FO","CT","GERENCIA"][q.level]}</p><p class="muted">Tiempo del bloque: <b id="blockElapsed"></b> · Bono máximo: +50 %</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${Number(state.answered)+index+1} de ${Number(state.total)}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
+    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA NIVEL "+["","FO","CT","GERENCIA"][q.level]}</p><p class="muted">Tiempo del bloque: <b id="blockElapsed"></b> · Bono máximo: +50 %</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${Number(state.answered)+index+1} de ${Number(state.total)}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
     // Retain the same original server anchor between questions.
     const label=$("blockElapsed");label.textContent=formatElapsed(Number(state.elapsed_seconds)+(Date.now()-state.receivedAt)/1000);
     const submit=$("submitAnswer");let submitting=false;
@@ -236,84 +236,125 @@ async function startQuestionSet(level){
   };
   state.receivedAt=Date.now();render();startBlockClock(state);
 }
+let photoConsent=false;
+let photoAIReady=false;
 const capturedPhotos=new Map();
 let cameraStream=null,cameraChallenge=null,cameraRequest=0;
 function stopCamera(){
   cameraRequest++;
   if(cameraStream)cameraStream.getTracks().forEach(track=>track.stop());
-  if(cameraChallenge){const host=$(`camera-${cameraChallenge}`);if(host)host.textContent=""}
+  if(cameraChallenge){const host=$(`camera-${cameraChallenge}`);if(host)host.textContent="";const button=$("game")?.querySelector?.(`[data-camera="${cameraChallenge}"]`);if(button&&!capturedPhotos.has(cameraChallenge))button.disabled=false}
   cameraStream=null;cameraChallenge=null;
 }
+function photoMsg(id,text){const target=$(id);if(target)target.textContent=text}
 async function openCamera(challengeId){
+  const feedback=`upload-${challengeId}`;
+  if(!photoConsent){photoMsg(feedback,"Autoriza el análisis por Google Gemini antes de tomar la foto.");return}
+  if(capturedPhotos.has(challengeId)){photoMsg(feedback,"Esta foto ya fue capturada. Espera a que se guarde o reintenta el guardado.");return}
   stopCamera();
-  const request=cameraRequest,version=pageVersion,feedback=`upload-${challengeId}`;
-  const host=$(`camera-${challengeId}`);
-  if(!navigator.mediaDevices?.getUserMedia){msg(feedback,"Este navegador no permite acceder a la cámara. Abre la aplicación en un navegador compatible mediante HTTPS.");return}
-  msg(feedback,"Abriendo cámara…");
+  const request=cameraRequest,version=pageVersion,id=user?.id;
+  const host=$(`camera-${challengeId}`),cameraButton=$("game").querySelector(`[data-camera="${challengeId}"]`);
+  if(cameraButton)cameraButton.disabled=true;cameraChallenge=challengeId;
+  if(!navigator.mediaDevices?.getUserMedia){if(cameraButton)cameraButton.disabled=false;photoMsg(feedback,"Este navegador no permite acceder a la cámara. Abre la aplicación en un navegador compatible mediante HTTPS.");return}
+  photoMsg(feedback,"Abriendo cámara…");
   try{
     const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1600},height:{ideal:1200}},audio:false});
     if(request!==cameraRequest || version!==pageVersion || !participant){stream.getTracks().forEach(track=>track.stop());return}
-    capturedPhotos.delete(challengeId);
-    const upload=$("game").querySelector(`[data-upload="${challengeId}"]`);upload.disabled=true;
     cameraStream=stream;cameraChallenge=challengeId;
     host.innerHTML='<video class="cameraPreview" autoplay muted playsinline aria-label="Vista previa de la cámara"></video><button data-shutter>Tomar foto</button><button class="secondary" data-cancel-camera>Cancelar</button>';
     const video=host.querySelector('video');video.srcObject=stream;await video.play();
     if(request!==cameraRequest)return;
-    msg(feedback,"");host.querySelector('[data-cancel-camera]').onclick=()=>stopCamera();
-    host.querySelector('[data-shutter]').onclick=async()=>{
-      if(!video.videoWidth || !video.videoHeight){msg(feedback,"Espera a que aparezca la imagen de la cámara.");return}
+    let capturing=false;const shutter=host.querySelector('[data-shutter]'),cancel=host.querySelector('[data-cancel-camera]');
+    photoMsg(feedback,"");cancel.onclick=()=>{stopCamera();if(cameraButton)cameraButton.disabled=false};
+    shutter.onclick=async()=>{
+      if(capturing)return;
+      if(!video.videoWidth || !video.videoHeight){photoMsg(feedback,"Espera a que aparezca la imagen de la cámara.");return}
+      capturing=true;shutter.disabled=true;cancel.disabled=true;
       const canvas=document.createElement('canvas');const scale=Math.min(1,1600/Math.max(video.videoWidth,video.videoHeight));
       canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
       canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
       const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.85));
-      if(request!==cameraRequest || version!==pageVersion)return;
-      if(!blob || blob.size>5*1024*1024){msg(feedback,"No se pudo preparar la foto. Intenta tomarla nuevamente.");return}
-      stopCamera();capturedPhotos.set(challengeId,{file:blob});
-      host.textContent="";canvas.className="cameraPreview";canvas.setAttribute('aria-label','Fotografía capturada');host.appendChild(canvas);
-      upload.disabled=false;msg(feedback,"Fotografía lista. Puedes enviarla o abrir la cámara para repetirla.");
+      if(request!==cameraRequest || user?.id!==id)return;
+      if(!blob || blob.size>5*1024*1024){capturing=false;shutter.disabled=false;cancel.disabled=false;photoMsg(feedback,"No se pudo preparar la foto. Intenta tomarla nuevamente.");return}
+      const capture={file:blob};capturedPhotos.set(challengeId,capture);stopCamera();
+      if(version===pageVersion){host.textContent="";canvas.className="cameraPreview";canvas.setAttribute('aria-label','Fotografía capturada');host.appendChild(canvas);if(cameraButton)cameraButton.disabled=true}
+      await uploadEvidence(challengeId,capture);
     };
   }catch{
-    if(request===cameraRequest){stopCamera();msg(feedback,"No se pudo abrir la cámara. Revisa el permiso de cámara del navegador y vuelve a intentarlo.")}
+    if(request===cameraRequest){stopCamera();if(cameraButton)cameraButton.disabled=false;photoMsg(feedback,"No se pudo abrir la cámara. Revisa el permiso de cámara del navegador y vuelve a intentarlo.")}
   }
 }
 window.addEventListener('pagehide',stopCamera);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera()});
+function photoChallengeMarkup(c,s){
+  const saved=s?.status==='pending',done=s?.status==='approved',capture=capturedPhotos.get(c.id);
+  const reason=s?.validation_reason?`<p class="muted">${escapeHtml(s.validation_reason)}</p>`:"";
+  let controls;
+  if(done)controls='<p class="photoComplete">✓ Desafío completado · puntos asignados</p><button disabled>Completado</button>';
+  else if(saved)controls=`<p class="msg">✓ Foto guardada · ${photoAIReady?"lista para validación IA":"validación IA aún no activada"}</p>${reason}<button disabled>Foto capturada</button><button data-analyze="${s.id}" data-challenge="${c.id}" ${photoConsent&&photoAIReady?"":"disabled"}>Validar foto con IA</button>${s.validation_reason?`<button class="secondary" data-camera="${c.id}">Tomar otra foto</button>`:""}`;
+  else if(capture)controls=`<p class="msg">✓ Foto capturada · ${capture.uploading?"guardando…":"falta completar el guardado"}</p><button disabled>Foto capturada</button><button data-save-photo="${c.id}" ${capture.uploading?"disabled":""}>Reintentar guardado</button>`;
+  else controls=`${s?.status==='rejected'?'<p class="msg">La fotografía no cumple el desafío. Puedes tomar otra.</p>'+reason:""}<div id="camera-${c.id}"></div><button data-camera="${c.id}">Abrir cámara</button><button data-save-photo="${c.id}" hidden>Reintentar guardado</button>`;
+  // Every path has a camera host and feedback; controls depend on persisted server status.
+  if(!controls.includes(`id="camera-${c.id}"`))controls+=`<div id="camera-${c.id}"></div>`;
+  return `<div class="challenge ${done?"challengeComplete":""}"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos · sin cronómetro</small>${controls}<span class="msg" role="status" id="upload-${c.id}"></span></div>`;
+}
 async function renderChallenges(){
-  stopCamera();capturedPhotos.clear();
+  stopCamera();
   const version=pageVersion,id=user.id;
-  const [challenges,submissions]=await Promise.all([
+  const [challenges,submissions,capability]=await Promise.all([
     db.from("challenges").select("*").eq("active",true).order("created_at",{ascending:false}),
-    db.from("submissions").select("challenge_id,status").eq("participant_id",id)
+    db.from("submissions").select("id,challenge_id,status,validation_reason").eq("participant_id",id),
+    db.functions.invoke("validate-photo",{method:"GET"}).catch(()=>({data:{ready:false}}))
   ]);
   if(version!==pageVersion || user?.id!==id)return;
   if(challenges.error || submissions.error){gameError("No se pudieron cargar los desafíos. Intenta nuevamente.");return}
-  const statuses=new Map((submissions.data||[]).map(s=>[s.challenge_id,s.status]));
-  const statusLabel={pending:"Pendiente de aprobación",approved:"Aprobada · puntos asignados",rejected:"Evidencia rechazada"};
+  photoAIReady=capability.data?.ready===true;
+  const statuses=new Map((submissions.data||[]).map(s=>[s.challenge_id,s]));
   const g=$("game");
-  g.innerHTML='<h2>¿Quién tiene…?</h2><p class="muted">Toma la fotografía ahora con la cámara. No se admiten imágenes de la galería. Pide permiso antes de fotografiar a otra persona.</p>'+
-    ((challenges.data||[]).map(c=>`<div class="challenge"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos</small>${statuses.has(c.id)?`<p class="msg">${statusLabel[statuses.get(c.id)]||"Evidencia recibida"}</p>`:`<div id="camera-${c.id}"></div><button data-camera="${c.id}">Abrir cámara</button><button data-upload="${c.id}" disabled>Enviar evidencia</button><span class="msg" role="status" id="upload-${c.id}"></span>`}</div>`).join("")||'<p class="muted">Aún no hay desafíos publicados.</p>')+backButton();
+  g.innerHTML='<h2>¿Quién tiene…?</h2><p>Sin límite de tiempo. Puedes salir, jugar otros ítems y volver; las fotos guardadas y los desafíos completados se conservan.</p><p class="muted">Toma la fotografía ahora con la cámara. No se admite la galería. Fotografía solo el objeto o la prenda, sin caras ni documentos personales, y pide permiso a la otra persona.</p>'+(!photoAIReady?'<p class="msg">La validación IA aún requiere activación del organizador. Las fotos se guardan, pero todavía no se asignan puntos automáticos.</p>':"")+`<label class="photoConsent"><input type="checkbox" id="photoConsent" ${photoConsent?"checked":""}> Autorizo que Google Gemini analice mis fotos para validar los desafíos. Según el plan, Google puede usarlas para mejorar sus servicios. <a href="https://ai.google.dev/gemini-api/terms" target="_blank" rel="noopener noreferrer">Condiciones del proveedor</a>.</label><button class="secondary" id="refreshPhotos">Actualizar desafíos</button><p class="msg" id="photoStatus" role="status"></p>`+
+    ((challenges.data||[]).map(c=>photoChallengeMarkup(c,statuses.get(c.id))).join("")||'<p class="muted">Aún no hay desafíos publicados.</p>')+backButton();
+  $("photoConsent").onchange=()=>{photoConsent=$("photoConsent").checked;g.querySelectorAll('[data-analyze]').forEach(b=>b.disabled=!photoConsent||!photoAIReady)};
   g.querySelectorAll("[data-camera]").forEach(b=>b.onclick=()=>openCamera(b.dataset.camera));
-  g.querySelectorAll("[data-upload]").forEach(b=>b.onclick=()=>busy(b,()=>uploadEvidence(b.dataset.upload)));$("gameBack").onclick=closeGame;
+  g.querySelectorAll("[data-save-photo]").forEach(b=>b.onclick=()=>uploadEvidence(b.dataset.savePhoto));
+  g.querySelectorAll("[data-analyze]").forEach(b=>b.onclick=()=>busy(b,()=>analyzeEvidence(b.dataset.analyze,b.dataset.challenge)));
+  $("refreshPhotos").onclick=()=>busy($("refreshPhotos"),()=>renderChallenges());$("gameBack").onclick=closeGame;
 }
-async function uploadEvidence(challengeId){
-  const capture=capturedPhotos.get(challengeId),f=capture?.file,feedback=`upload-${challengeId}`,id=user?.id,version=pageVersion;
-  if(!f){msg(feedback,"Toma una fotografía con la cámara.");return}
-  if(!["image/jpeg","image/png","image/webp"].includes(f.type)||f.size>5*1024*1024 || f.size===0){msg(feedback,"Usa una imagen JPG, PNG o WebP de máximo 5 MB.");return}
-  msg(feedback,"Subiendo…");
+async function analyzeEvidence(submissionId,challengeId,uiVersion=pageVersion){
+  const version=uiVersion,id=user?.id,feedback=`upload-${challengeId}`;
+  if(!photoConsent){if(version===pageVersion)photoMsg(feedback,"Autoriza el análisis por Google Gemini.");return}
+  if(!photoAIReady){photoMsg(feedback,"El organizador debe activar la validación IA. La foto está guardada.");return}
+  photoMsg(feedback,"La IA está analizando la foto. Puedes salir y volver más tarde.");
   try{
-    // Keep the captured photo path for retries after transient insert failures.
-    const pending=capture.pendingUpload;
-    let path=pending?.file===f?pending.path:null;
+    const {data,error}=await db.functions.invoke("validate-photo",{body:{submission_id:submissionId,consent:true}});
+    if(data?.status==='approved'&&user?.id===id)await refreshScore();
+    if(version!==pageVersion||user?.id!==id)return;
+    if(error){let detail;try{detail=await error.context?.json()}catch{}photoMsg(feedback,detail?.message||"No se pudo completar la validación IA. La foto sigue guardada; puedes reintentar.");return}
+    if(data?.status==='approved'||data?.status==='rejected'){await renderChallenges();return}
+    photoMsg(feedback,data?.reason||"La foto está guardada. Actualiza los desafíos para ver el resultado.");
+  }catch{if(version===pageVersion&&user?.id===id)photoMsg(feedback,"No se pudo completar la validación IA. La foto sigue guardada; puedes reintentar.")}
+}
+async function uploadEvidence(challengeId,capture=capturedPhotos.get(challengeId)){
+  const f=capture?.file,feedback=`upload-${challengeId}`,id=user?.id,version=pageVersion;
+  if(!f){photoMsg(feedback,"Toma una fotografía con la cámara.");return}
+  if(capture.uploading)return;
+  if(!["image/jpeg","image/png","image/webp"].includes(f.type)||f.size>5*1024*1024||f.size===0){photoMsg(feedback,"Usa una imagen JPG, PNG o WebP de máximo 5 MB.");return}
+  capture.uploading=true;photoMsg(feedback,"Guardando foto… Puedes volver al menú mientras termina.");
+  try{
+    const pending=capture.pendingUpload;let path=pending?.file===f?pending.path:null;
     if(!path){
       const ext={"image/jpeg":"jpg","image/png":"png","image/webp":"webp"}[f.type];path=`${id}/${crypto.randomUUID()}.${ext}`;
       const {error}=await db.storage.from("evidence").upload(path,f,{upsert:false,contentType:f.type});
       if(error)throw error;capture.pendingUpload={file:f,path};
     }
-    if(version!==pageVersion || user?.id!==id)return;
-    const {error}=await db.from("submissions").insert({participant_id:id,challenge_id:challengeId,photo_path:path});
-    if(error && error.code!=="23505")throw error;
-    if(version===pageVersion){await renderChallenges();await refreshScore()}
-  }catch{if(version===pageVersion)msg(feedback,"No se pudo enviar la evidencia. Intenta nuevamente.")}
+    // Navigation does not cancel saving. Authorization is still enforced by the server.
+    const {data,error}=await db.rpc("save_photo_submission",{p_challenge_id:challengeId,p_photo_path:path});
+    if(error||!data?.id)throw error||new Error();
+    capturedPhotos.delete(challengeId);
+    if(version===pageVersion&&user?.id===id)await renderChallenges();
+    if(photoConsent&&photoAIReady&&user?.id===id&&data.status==='pending')await analyzeEvidence(data.id,challengeId,version);
+  }catch{
+    if(version===pageVersion&&user?.id===id){photoMsg(feedback,"No se pudo guardar la foto. Reintenta el guardado.");const retry=$("game").querySelector(`[data-save-photo="${challengeId}"]`);if(retry){retry.hidden=false;retry.disabled=false}}
+  }finally{capture.uploading=false}
 }
 function sortRanking(rows){return [...rows].sort((a,b)=>b.points-a.points || a.nickname.localeCompare(b.nickname,"es") || a.role.localeCompare(b.role))}
 async function renderRanking(){
