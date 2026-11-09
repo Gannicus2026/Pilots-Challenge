@@ -172,3 +172,13 @@ test('background AI result refreshes score without reopening the photo item',asy
  const pending=a.run('analyzeEvidence("submission","challenge")');a.run('closeGame();currentGame="trivia"');resolve({data:{status:'approved',points:10}});await pending;
  assert.equal(refreshes,1);assert.equal(a.element('game').hidden,true);
 });
+
+test('assignment opens chosen trivia level directly without starting its clock',async()=>{
+ const queries=[];const a=app({from:table=>{queries.push(table);const chain={select(){return chain},eq(){return chain},order(){return chain},then(fn){return Promise.resolve({data:table==='public_questions'?[{id:'ct-question',game:'trivia',level:2}]:[]}).then(fn)}};return chain}});
+ a.run("user={id:'player'};participant={id:'player'}");
+ await a.run("openPage('trivia',2)");
+ assert.match(a.element('game').innerHTML,/Trivia Nivel CT/);
+ assert.match(a.element('game').innerHTML,/Comenzar \/ continuar bloque/);
+ assert.doesNotMatch(a.element('game').innerHTML,/Elige el nivel/);
+ assert.deepEqual(queries,['public_questions','answer_attempts']);
+});
