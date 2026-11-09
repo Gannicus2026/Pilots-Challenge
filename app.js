@@ -33,7 +33,15 @@ function applyEventState(state){
 function applyEventLock(){
   [...$("game").querySelectorAll("#beginBlock,#submitAnswer,[data-answer],[data-level],[data-camera],[data-shutter],[data-analyze],[data-save-photo]"),...$("pending").querySelectorAll("[data-approve],[data-reject]")].forEach(b=>{
     if(eventPaused){if(b.dataset.eventDisabled===undefined)b.dataset.eventDisabled=String(b.disabled);b.disabled=true}
-    else if(b.dataset.eventDisabled!==undefined){b.disabled=b.dataset.eventDisabled==="true";delete b.dataset.eventDisabled}
+    else if(b.dataset.eventDisabled!==undefined){
+      if(b.id==="submitAnswer")b.disabled=selectedAnswer===null;
+      else if(b.id==="beginBlock"||b.dataset.answer!==undefined||b.dataset.level!==undefined)b.disabled=false;
+      else if(b.dataset.analyze!==undefined)b.disabled=!photoConsent||!photoAIReady;
+      else if(b.dataset.camera!==undefined)b.disabled=capturedPhotos.has(b.dataset.camera);
+      else if(b.dataset.savePhoto!==undefined)b.disabled=capturedPhotos.get(b.dataset.savePhoto)?.uploading===true;
+      else b.disabled=b.dataset.eventDisabled==="true";
+      delete b.dataset.eventDisabled;
+    }
   });
 }
 async function refreshEventState(){
@@ -42,6 +50,7 @@ async function refreshEventState(){
   if(user?.id!==id)return null;if(error)throw error;
   if(!data||typeof data.paused!=="boolean")return null;
   const resumed=eventPaused&&!data.paused;applyEventState(data);
+  if(resumed&&!$("admin").hidden)await loadPending();
   if(resumed&&participant&&activeBlockState&&["trivia","tf"].includes(currentGame)){
     const version=pageVersion,active=activeBlockState;
     const {data:clock,error:clockError}=await db.rpc("start_block",{p_game:currentGame,p_level:activeBlockLevel});
@@ -62,7 +71,7 @@ async function sendEventControl(action){
       const {data,error}=await db.rpc("control_event",{p_action:action,p_closes_at:deadline?deadline.toISOString():null});
       if(error)throw error;applyEventState(data);
       msg("eventControlMsg",action==="pause"?"Juego cerrado. Los puntajes quedan congelados.":action==="resume"?"Juego reanudado desde el progreso guardado.":deadline?"Cierre automático programado.":"Cierre automático eliminado.");
-      await loadAdminRanking();
+      await Promise.all([loadAdminRanking(),loadPending()]);
     }catch{msg("eventControlMsg","No se pudo cambiar el estado. Actualiza el panel e inténtalo de nuevo.")}
   });
   try{await refreshEventState()}catch{}
