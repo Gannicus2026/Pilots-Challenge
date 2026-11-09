@@ -3,13 +3,13 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync('app.js','utf8').replace('if(configured)session();','');
-function app({hash='',search='',session=null,admin=false,from=null,rpc=null,auth={}}={}){
+function app({hash='',search='',session=null,admin=false,from=null,rpc=null,auth={},mediaDevices={}}={}){
  const elements=new Map();
  const element=id=>{if(!elements.has(id))elements.set(id,{hidden:false,value:'',textContent:'',disabled:false,checked:false,querySelectorAll:()=>[],focus(){},reset(){element('newPassword').value='';element('confirmPassword').value=''},reportValidity:()=>true});return elements.get(id)};
  const storage=new Map();let listener,updates=0,signouts=0;
  const db={auth:{onAuthStateChange:fn=>{listener=fn},getSession:async()=>({data:{session}}),getUser:async()=>({data:{user:session?.user}}),updateUser:async()=>{updates++;return{}},signOut:async()=>{signouts++;session=null;listener('SIGNED_OUT');return{}},resetPasswordForEmail:async()=>({})},rpc:async()=>({data:admin})};
  Object.assign(db.auth,auth);if(from)db.from=from;if(rpc)db.rpc=rpc;
- const context=vm.createContext({window:{supabase:{createClient:()=>db},scrollTo(){}},document:{getElementById:element,querySelectorAll:()=>[]},location:{hash,search,href:'https://example.test/Pilots-Challenge/'+search+hash,pathname:'/Pilots-Challenge/',origin:'https://example.test'},history:{replaceState(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},URL,URLSearchParams,console,confirm:()=>true,alert:()=>{}});
+ const context=vm.createContext({navigator:{mediaDevices},window:{addEventListener(){},supabase:{createClient:()=>db},scrollTo(){}},document:{addEventListener(){},getElementById:element,querySelectorAll:()=>[]},location:{hash,search,href:'https://example.test/Pilots-Challenge/'+search+hash,pathname:'/Pilots-Challenge/',origin:'https://example.test'},history:{replaceState(){}},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},URL,URLSearchParams,console,confirm:()=>true,alert:()=>{}});
  vm.runInContext(source,context);
  return {element,run:code=>vm.runInContext(code,context),event:(e,s)=>listener(e,s),updates:()=>updates,signouts:()=>signouts};
 }
@@ -83,9 +83,39 @@ test('editing true/false and clearing restores usable trivia defaults',()=>{
  a.run('clearQuestion()');assert.equal(a.element('qGame').value,'trivia');assert.equal(a.element('qLevel').disabled,false);assert.equal(a.element('optionFields').hidden,false);assert.equal(a.element('qActive').checked,true);
 });
 test('unsupported image types never reach Storage',async()=>{
- const a=app();a.element('photo-test').files=[{type:'image/heic',size:1000}];await a.run('uploadEvidence("test")');
+ const a=app();a.run('capturedPhotos.set("test",{file:{type:"image/heic",size:1000}})');await a.run('uploadEvidence("test")');
  assert.match(a.element('upload-test').textContent,/JPG, PNG o WebP/);
 });
 test('ranking is deterministic for tied scores',()=>{
  const a=app();assert.equal(a.run('sortRanking([{nickname:"Zulu",role:"CT",points:10},{nickname:"Alpha",role:"FO",points:10}])[0].nickname'),'Alpha');
+});
+
+test('camera denial gives an actionable message without permitting gallery upload',async()=>{
+ const a=app({mediaDevices:{getUserMedia:async()=>{throw new Error('denied')}}});
+ await a.run('openCamera("test")');assert.match(a.element('upload-test').textContent,/permiso de cámara/);
+ assert.doesNotMatch(source,/type="file"/);
+});
+test('camera stream resolved after leaving the page is stopped',async()=>{
+ let resolve,stopped=0;
+ const a=app({mediaDevices:{getUserMedia:()=>new Promise(r=>{resolve=r})}});
+ a.run('participant={id:"p"}');const pending=a.run('openCamera("test")');a.run('closeGame()');
+ resolve({getTracks:()=>[{stop(){stopped++}}]});await pending;assert.equal(stopped,1);
+});
+test('evidence cannot be uploaded without a live camera capture',async()=>{
+ const a=app();await a.run('uploadEvidence("test")');assert.match(a.element('upload-test').textContent,/cámara/);
+});
+test('live camera capture stops the stream and enables evidence upload',async()=>{
+ let stopped=0,requested,drawn=0;
+ const video={videoWidth:1920,videoHeight:1080,play:async()=>{}};
+ const shutter={},cancel={},upload={disabled:true};const photo={type:'image/jpeg',size:1000};
+ const canvas={getContext:()=>({drawImage(){drawn++}}),toBlob:fn=>fn(photo),setAttribute(){}};
+ const a=app({mediaDevices:{getUserMedia:async options=>{requested=options;return{getTracks:()=>[{stop(){stopped++}}]}}}});
+ a.element('camera-test').querySelector=selector=>selector==='video'?video:selector==='[data-shutter]'?shutter:cancel;
+ a.element('camera-test').appendChild=()=>{};a.element('game').querySelector=()=>upload;
+ a.run('participant={id:"p"}');a.run('document.createElement=()=>({})');
+ // Supply the canvas through a test-only bridge, without a file selector.
+ a.element('canvasBridge').canvas=canvas;a.run('document.createElement=()=>document.getElementById("canvasBridge").canvas');
+ await a.run('openCamera("test")');assert.equal(requested.audio,false);assert.equal(upload.disabled,true);
+ await shutter.onclick();assert.equal(drawn,1);assert.equal(stopped,1);assert.equal(upload.disabled,false);
+ assert.equal(a.run('capturedPhotos.get("test").file.type'),'image/jpeg');
 });
