@@ -19,13 +19,13 @@ Ejecuta `node --check app.js` y `node --test tests/auth.test.cjs`. Las pruebas u
 
 ## Preparación del evento
 
-La aplicación conserva el proyecto y los datos actuales. Los tres niveles de trivia, Verdadero/Falso y los desafíos de objetos se administran desde **Acceso organizador**. El panel muestra cuántos elementos activos tiene cada juego. No se han agregado preguntas o desafíos de contenido sin revisar.
+La aplicación conserva el proyecto y los datos actuales. Los tres niveles de trivia, Verdadero/Falso y los desafíos de objetos se administran desde **Acceso organizador**. El panel muestra cuántos elementos activos tiene cada juego. Banco aprobado cargado el 9 de noviembre de 2026: 10 preguntas FO, 10 CT, 10 Gerencia, 10 Verdadero/Falso (6 verdaderas y 4 falsas), y 12 desafíos fotográficos. Las claves se guardan únicamente en la tabla protegida `questions`; no se incluyen en los archivos públicos.
 
 - Registro: pseudónimo de 2 a 24 caracteres y cargo FO/CT. La función `register_participant` establece el puntaje inicial en el servidor.
 - Preguntas: completa las cuatro alternativas de trivia, la respuesta correcta, nivel y puntos de 1 a 1000. Para Verdadero/Falso las alternativas se completan automáticamente. Las alternativas se guardan como una lista, compatible con el esquema instalado.
 - Disponibilidad: activa o desactiva preguntas y desafíos; desactivarlos conserva sus intentos, evidencias y puntajes.
 - Progreso: al volver a un juego se omiten las preguntas ya respondidas. El servidor impide puntuar dos veces por la misma pregunta.
-- Evidencias: JPG, PNG o WebP de hasta 5 MB; estados pendiente, aprobada y rechazada. Se permite una evidencia por participante y desafío. Las fotos siguen en un bucket privado y el organizador accede con enlaces temporales. Usa **Actualizar panel** si venció una imagen.
+- Evidencias: captura en vivo con `getUserMedia`, vista previa y repetición, sin selector de galería; JPEG de hasta 5 MB; estados pendiente, aprobada y rechazada. Se permite una evidencia por participante y desafío. Las fotos siguen en un bucket privado y el organizador accede con enlaces temporales. Usa **Actualizar panel** si venció una imagen.
 - Ranking: vistas General, FO y CT, actualización manual y posiciones compartidas en empates.
 - Invitados: descarga el QR desde el panel, imprime y comparte. `entry-qr.svg` apunta únicamente a la URL pública de GitHub Pages y no depende de un servicio de QR externo.
 
@@ -38,3 +38,5 @@ Las vistas públicas exponen solamente preguntas activas sin respuesta correcta 
 ### Comprobaciones
 
 `node --test tests/auth.test.cjs` verifica recuperación, registro por RPC, doble toque, formatos de opciones, edición, validaciones y ranking. `tests/security.sql` comprueba los permisos y el puntaje con una transacción que revierte todos los datos de prueba. Ejecuta esa prueba desde una conexión administrativa y conserva el `rollback` final.
+
+Los nombres FO, CT y Gerencia son niveles de trivia de libre elección; el cargo del registro sigue siendo FO/CT. La cámara se apaga al capturar, cancelar, cambiar de pantalla o dejar la pestaña. Se requiere HTTPS y permiso de cámara. Esta restricción evita la galería en la interfaz; un cliente manipulado no permite certificar criptográficamente la procedencia de la imagen.

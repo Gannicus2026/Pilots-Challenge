@@ -15,7 +15,7 @@ const show=(id)=>$(id).hidden=false, hide=(id)=>$(id).hidden=true;
 const msg=(id,s)=>$(id).textContent=s;
 function needConfig(){if(!db){alert("Falta configurar Supabase. Sigue los pasos del archivo README.");return false}return true}
 function resetScreen(){
-  pageVersion++;questionCache=[];challengeCache=[];
+  stopCamera();capturedPhotos.clear();pageVersion++;questionCache=[];challengeCache=[];
   if(typeof $("qGame").onchange==="function")clearQuestion();
   clearChallenge();$("newPasswordForm").reset();
   ["setup","participant","adminLogin","admin","game","passwordRecovery"].forEach(hide);
@@ -153,13 +153,13 @@ $("join").onclick=()=>busy($("join"),async()=>{
     await loadParticipant();msg("setupMsg","");
   }catch{msg("setupMsg",connectionMessage)}
 });
-function closeGame(){pageVersion++;hide("game")}
+function closeGame(){stopCamera();capturedPhotos.clear();pageVersion++;hide("game")}
 document.querySelectorAll(".tile").forEach(button=>button.onclick=()=>openPage(button.dataset.page));
 function backButton(id="gameBack"){return `<button class="secondary" id="${id}">Volver al menú</button>`}
 function gameError(text){$("game").innerHTML=`<p role="status">${escapeHtml(text)}</p>${backButton()}`;$("gameBack").onclick=closeGame}
 async function openPage(page){
   if(!participant || !needConfig())return;
-  currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
+  stopCamera();capturedPhotos.clear();currentGame=page;rankRole="";const version=++pageVersion;show("game");$("game").innerHTML='<p class="muted" role="status">Cargando…</p>';
   try{
     if(page==="ranking"){await renderRanking();await refreshScore();return}
     if(page==="objects"){await renderChallenges();return}
@@ -174,7 +174,7 @@ async function openPage(page){
     const answered=new Set((attempts.data||[]).map(a=>a.question_id));
     currentQuestions=(questions.data||[]).filter(q=>!answered.has(q.id));
     if(page==="trivia"){
-      $("game").innerHTML='<h2>Elige tu nivel</h2><p class="muted">Puedes jugar los tres niveles. Cada pregunta puntúa una sola vez.</p><div class="answers">'+["Básica","Intermedia","Experta"].map((label,i)=>`<button data-level="${i+1}">${label} · ${currentQuestions.filter(q=>q.level===i+1).length} pendientes</button>`).join("")+`</div>${backButton()}`;
+      $("game").innerHTML='<h2>Elige tu nivel</h2><p class="muted">Puedes jugar los tres niveles. Cada pregunta puntúa una sola vez.</p><div class="answers">'+["FO","CT","Gerencia"].map((label,i)=>`<button data-level="${i+1}">${label} · ${currentQuestions.filter(q=>q.level===i+1).length} pendientes</button>`).join("")+`</div>${backButton()}`;
       $("game").querySelectorAll("[data-level]").forEach(b=>b.onclick=()=>startQuestionSet(Number(b.dataset.level)));
       $("gameBack").onclick=closeGame;
     }else startQuestionSet(null);
@@ -186,7 +186,7 @@ function startQuestionSet(level){
   if(!qs.length){gameError("No quedan preguntas pendientes en esta selección. Puede que ya las hayas respondido o que aún no se hayan publicado.");return}
   const render=()=>{
     const q=qs[index];selectedAnswer=null;
-    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA · "+["","BÁSICA","INTERMEDIA","EXPERTA"][q.level]}</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${index+1} de ${qs.length}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
+    $("game").innerHTML=`<p class="eyebrow">${game==="tf"?"VERDADERO O FALSO":"TRIVIA · "+["","FO","CT","GERENCIA"][q.level]}</p><h2>${escapeHtml(q.question)}</h2><div class="answers">${optionsFor(q).map(([key,text])=>`<button data-answer="${escapeHtml(key)}"><b>${escapeHtml(key)}.</b> ${escapeHtml(text)}</button>`).join("")}</div><p class="muted">Pregunta ${index+1} de ${qs.length}</p><button id="submitAnswer" disabled>Responder</button>${backButton()}<p id="answerMsg" class="msg" role="status"></p>`;
     const submit=$("submitAnswer");let submitting=false;
     $("game").querySelectorAll("[data-answer]").forEach(b=>b.onclick=()=>{
       if(submitting)return;selectedAnswer=b.dataset.answer;
@@ -211,7 +211,50 @@ function startQuestionSet(level){
     };
   };render();
 }
+const capturedPhotos=new Map();
+let cameraStream=null,cameraChallenge=null,cameraRequest=0;
+function stopCamera(){
+  cameraRequest++;
+  if(cameraStream)cameraStream.getTracks().forEach(track=>track.stop());
+  if(cameraChallenge){const host=$(`camera-${cameraChallenge}`);if(host)host.textContent=""}
+  cameraStream=null;cameraChallenge=null;
+}
+async function openCamera(challengeId){
+  stopCamera();
+  const request=cameraRequest,version=pageVersion,feedback=`upload-${challengeId}`;
+  const host=$(`camera-${challengeId}`);
+  if(!navigator.mediaDevices?.getUserMedia){msg(feedback,"Este navegador no permite acceder a la cámara. Abre la aplicación en un navegador compatible mediante HTTPS.");return}
+  msg(feedback,"Abriendo cámara…");
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1600},height:{ideal:1200}},audio:false});
+    if(request!==cameraRequest || version!==pageVersion || !participant){stream.getTracks().forEach(track=>track.stop());return}
+    capturedPhotos.delete(challengeId);
+    const upload=$("game").querySelector(`[data-upload="${challengeId}"]`);upload.disabled=true;
+    cameraStream=stream;cameraChallenge=challengeId;
+    host.innerHTML='<video class="cameraPreview" autoplay muted playsinline aria-label="Vista previa de la cámara"></video><button data-shutter>Tomar foto</button><button class="secondary" data-cancel-camera>Cancelar</button>';
+    const video=host.querySelector('video');video.srcObject=stream;await video.play();
+    if(request!==cameraRequest)return;
+    msg(feedback,"");host.querySelector('[data-cancel-camera]').onclick=()=>stopCamera();
+    host.querySelector('[data-shutter]').onclick=async()=>{
+      if(!video.videoWidth || !video.videoHeight){msg(feedback,"Espera a que aparezca la imagen de la cámara.");return}
+      const canvas=document.createElement('canvas');const scale=Math.min(1,1600/Math.max(video.videoWidth,video.videoHeight));
+      canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
+      canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.85));
+      if(request!==cameraRequest || version!==pageVersion)return;
+      if(!blob || blob.size>5*1024*1024){msg(feedback,"No se pudo preparar la foto. Intenta tomarla nuevamente.");return}
+      stopCamera();capturedPhotos.set(challengeId,{file:blob});
+      host.textContent="";canvas.className="cameraPreview";canvas.setAttribute('aria-label','Fotografía capturada');host.appendChild(canvas);
+      upload.disabled=false;msg(feedback,"Fotografía lista. Puedes enviarla o abrir la cámara para repetirla.");
+    };
+  }catch{
+    if(request===cameraRequest){stopCamera();msg(feedback,"No se pudo abrir la cámara. Revisa el permiso de cámara del navegador y vuelve a intentarlo.")}
+  }
+}
+window.addEventListener('pagehide',stopCamera);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera()});
 async function renderChallenges(){
+  stopCamera();capturedPhotos.clear();
   const version=pageVersion,id=user.id;
   const [challenges,submissions]=await Promise.all([
     db.from("challenges").select("*").eq("active",true).order("created_at",{ascending:false}),
@@ -222,23 +265,24 @@ async function renderChallenges(){
   const statuses=new Map((submissions.data||[]).map(s=>[s.challenge_id,s.status]));
   const statusLabel={pending:"Pendiente de aprobación",approved:"Aprobada · puntos asignados",rejected:"Evidencia rechazada"};
   const g=$("game");
-  g.innerHTML='<h2>¿Quién tiene…?</h2><p class="muted">Sube una fotografía del objeto en formato JPG, PNG o WebP, de máximo 5 MB. Evita documentos personales, rostros e información operacional.</p>'+
-    ((challenges.data||[]).map(c=>`<div class="challenge"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos</small>${statuses.has(c.id)?`<p class="msg">${statusLabel[statuses.get(c.id)]||"Evidencia recibida"}</p>`:`<label>Fotografía<input type="file" accept="image/jpeg,image/png,image/webp" id="photo-${c.id}"></label><button data-upload="${c.id}">Enviar evidencia</button><span class="msg" role="status" id="upload-${c.id}"></span>`}</div>`).join("")||'<p class="muted">Aún no hay desafíos publicados.</p>')+backButton();
+  g.innerHTML='<h2>¿Quién tiene…?</h2><p class="muted">Toma la fotografía ahora con la cámara. No se admiten imágenes de la galería. Pide permiso antes de fotografiar a otra persona.</p>'+
+    ((challenges.data||[]).map(c=>`<div class="challenge"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos</small>${statuses.has(c.id)?`<p class="msg">${statusLabel[statuses.get(c.id)]||"Evidencia recibida"}</p>`:`<div id="camera-${c.id}"></div><button data-camera="${c.id}">Abrir cámara</button><button data-upload="${c.id}" disabled>Enviar evidencia</button><span class="msg" role="status" id="upload-${c.id}"></span>`}</div>`).join("")||'<p class="muted">Aún no hay desafíos publicados.</p>')+backButton();
+  g.querySelectorAll("[data-camera]").forEach(b=>b.onclick=()=>openCamera(b.dataset.camera));
   g.querySelectorAll("[data-upload]").forEach(b=>b.onclick=()=>busy(b,()=>uploadEvidence(b.dataset.upload)));$("gameBack").onclick=closeGame;
 }
 async function uploadEvidence(challengeId){
-  const f=$(`photo-${challengeId}`).files[0],feedback=`upload-${challengeId}`,id=user?.id,version=pageVersion;
-  if(!f){msg(feedback,"Selecciona una fotografía.");return}
+  const capture=capturedPhotos.get(challengeId),f=capture?.file,feedback=`upload-${challengeId}`,id=user?.id,version=pageVersion;
+  if(!f){msg(feedback,"Toma una fotografía con la cámara.");return}
   if(!["image/jpeg","image/png","image/webp"].includes(f.type)||f.size>5*1024*1024 || f.size===0){msg(feedback,"Usa una imagen JPG, PNG o WebP de máximo 5 MB.");return}
   msg(feedback,"Subiendo…");
   try{
-    // Keep the chosen path on the file input for retries after transient insert failures.
-    const input=$(`photo-${challengeId}`),pending=input.pendingUpload;
+    // Keep the captured photo path for retries after transient insert failures.
+    const pending=capture.pendingUpload;
     let path=pending?.file===f?pending.path:null;
     if(!path){
       const ext={"image/jpeg":"jpg","image/png":"png","image/webp":"webp"}[f.type];path=`${id}/${crypto.randomUUID()}.${ext}`;
       const {error}=await db.storage.from("evidence").upload(path,f,{upsert:false,contentType:f.type});
-      if(error)throw error;input.pendingUpload={file:f,path};
+      if(error)throw error;capture.pendingUpload={file:f,path};
     }
     if(version!==pageVersion || user?.id!==id)return;
     const {error}=await db.from("submissions").insert({participant_id:id,challenge_id:challengeId,photo_path:path});
@@ -322,7 +366,7 @@ async function loadAdmin(){
   $("challengeList").innerHTML=challengeCache.map(c=>`<div class="challenge"><strong>${escapeHtml(c.description)}</strong><small>${c.points} puntos · ${c.active?"Activo":"Inactivo"}</small><button class="secondary" data-edit="${c.id}">Editar</button><button class="secondary" data-toggle="${c.id}">${c.active?"Desactivar":"Activar"}</button></div>`).join("")||'<p class="muted">Aún no hay desafíos.</p>';
   $("challengeList").querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editChallenge(challengeCache.find(c=>c.id===b.dataset.edit)));
   $("challengeList").querySelectorAll("[data-toggle]").forEach(b=>b.onclick=()=>busy(b,()=>toggleActive("challenges",b.dataset.toggle,!challengeCache.find(c=>c.id===b.dataset.toggle).active)));
-  const trivia=[1,2,3].map(level=>`${["","Básica","Intermedia","Experta"][level]}: ${questionCache.filter(q=>q.game==="trivia" && q.level===level && q.active).length}`);
+  const trivia=[1,2,3].map(level=>`${["","FO","CT","Gerencia"][level]}: ${questionCache.filter(q=>q.game==="trivia" && q.level===level && q.active).length}`);
   msg("contentSummary",[...trivia,`Verdadero/Falso: ${questionCache.filter(q=>q.game==="tf" && q.active).length}`,`Objetos: ${challengeCache.filter(c=>c.active).length}`].join(" · "));
   await Promise.all([loadPending(),loadAdminRanking()]);
 }
