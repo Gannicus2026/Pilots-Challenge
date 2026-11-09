@@ -49,11 +49,11 @@ Cada acierto mantiene su valor. Al responder la última pregunta se agrega una s
 
 Las sesiones iniciadas mediante clientes antiguos conservan sus puntos y no reciben bonos retroactivos. Las tablas de cronometraje y sus preguntas con clave están en el esquema privado `pilots_private`, con RLS y sin acceso directo de participantes. Las funciones públicas usan wrappers sin privilegios elevados y las funciones privadas validan la identidad y serializan los cambios por participante.
 
-## Validación de fotografías por IA — preparada, pendiente de autorización
+## Validación de fotografías por IA
 
-La función desplegada actualmente es `supabase/functions/validate-photo/index.ts`: informa que la validación IA no está activada y rechaza todas las solicitudes de análisis. No descarga fotos ni las envía a Google. Las evidencias anteriores se conservan y las nuevas fotos se guardan automáticamente; todavía no ganan puntos automáticos por IA. La revisión del organizador existente se conserva como alternativa.
+La integración con Google Gemini está desplegada y autorizada por el propietario. Las fotos se guardan automáticamente y solo ganan puntos cuando el servidor recibe una validación aceptada. Los errores conservan la evidencia y no conceden puntos. La revisión del organizador existente se conserva como alternativa.
 
-La integración completa está preparada en `prepared-index.ts` y `core.mjs`, pero NO está activada. Antes de desplegarla se necesita autorización expresa del propietario para enviar a Google Gemini la foto y la descripción del desafío. El participante también debe aceptar ese análisis antes de capturar o validar. La app pide fotografiar el objeto o la prenda sin caras ni documentos personales. La API gratuita de Google tiene cupos y sus condiciones pueden permitir el uso del contenido para mejorar sus servicios; comprobar las condiciones y el plan elegido antes de activarla.
+La función usa `index.ts` y `core.mjs`. El propietario autorizó enviar a Google Gemini la foto y la descripción del desafío. El participante también debe aceptar ese análisis antes de capturar o validar. La app pide fotografiar el objeto o la prenda sin caras ni documentos personales. La API gratuita de Google tiene cupos y sus condiciones pueden permitir el uso del contenido para mejorar sus servicios; comprobar las condiciones y el plan elegido antes de activarla.
 
 Tras la autorización, guardar `GEMINI_API_KEY` en **Supabase > Edge Functions > Secrets**, nunca en GitHub ni en el chat, y configurar `PHOTO_AI_ENABLED=true`. El modelo por defecto es `gemini-2.5-flash-lite`; se puede seleccionar otro modelo compatible con `GEMINI_MODEL`. Las claves de Supabase del servidor se leen de las variables automáticas del entorno, sin incluirlas en archivos públicos. No es necesario cambiar la base de datos, usuarios ni evidencias para conectar la clave.
 
@@ -62,3 +62,5 @@ La integración verifica la sesión con Supabase Auth antes de analizar. Descarg
 La ventana de bono actual es de 3 a 15 minutos; los bloques ya terminados conservan sus resultados. Las migraciones `add_secure_photo_ai_validation_and_event_revisions` y `fix_photo_review_reason_variable` están registradas en Supabase.
 
 Pruebas: `node --test tests/auth.test.cjs tests/photo-ai.test.cjs`. Las pruebas de IA simulan al proveedor y no envían fotos reales. `tests/photo-validation.sql` verifica autorización y acreditación de puntos en una transacción que revierte sus registros de prueba.
+
+El estado GET distingue `ready` (configuración presente) y `connection_ok` (acceso de lectura al modelo). Ninguno garantiza la cuota de generación ni una foto validada. Los registros de fallos contienen únicamente etapa, estado HTTP y códigos de error; no contienen claves, imágenes ni respuestas del modelo.
