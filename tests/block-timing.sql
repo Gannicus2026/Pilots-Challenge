@@ -13,8 +13,8 @@ begin
   if state->'questions'->0 ? 'correct_answer' then raise exception 'Correct answer leaked'; end if;
   resumed:=public.start_block(g,lv);
   if resumed->>'started_at'<>started then raise exception 'Clock reset on resume'; end if;
-  if n=2 then update pilots_private.block_runs set started_at=clock_timestamp()-interval '359 seconds' where participant_id=auth.uid() and game=g and level=lv; end if;
-  if n=3 then update pilots_private.block_runs set started_at=clock_timestamp()-interval '601 seconds' where participant_id=auth.uid() and game=g and level=lv; end if;
+  if n=2 then update pilots_private.block_runs set started_at=clock_timestamp()-interval '104 seconds' where participant_id=auth.uid() and game=g and level=lv; end if;
+  if n=3 then update pilots_private.block_runs set started_at=clock_timestamp()-interval '181 seconds' where participant_id=auth.uid() and game=g and level=lv; end if;
   -- Changing publication during a run must not change its captured question set.
   if n=1 then update public.questions set active=false where id=(state->'questions'->0->>'id')::uuid; end if;
   first_score:=null;
