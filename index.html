@@ -5,7 +5,7 @@
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#101827"><title>Pilots Challenge</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0" integrity="sha384-gnyZit14c5lnGcarmA166QQjjJXpucw25ogZXuwH3HxxY904zHkBqmxVpelsPorb" crossorigin="anonymous"></script>
 </head>
 <body>
 <header class="top"><div class="brand">✈ PILOTS <span>CHALLENGE</span></div><div id="who" class="who"></div></header>
@@ -25,7 +25,7 @@
       <button class="tile" data-page="trivia"><b>01</b><span>Trivia por niveles</span><small>Básica · Intermedia · Experta</small></button>
       <button class="tile" data-page="tf"><b>02</b><span>Verdadero o falso</span><small>Preguntas rápidas</small></button>
       <button class="tile" data-page="objects"><b>03</b><span>¿Quién tiene…?</span><small>Sube una foto como evidencia</small></button>
-      <button class="tile" data-page="ranking"><b>04</b><span>Ranking en vivo</span><small>Compite con la tripulación</small></button>
+      <button class="tile" data-page="ranking"><b>04</b><span>Ranking general</span><small>General · FO · CT</small></button>
     </div>
     <section id="game" class="panel" hidden></section>
   </section>
@@ -53,9 +53,11 @@
   <section id="admin" hidden>
     <button id="adminSignOut" class="secondary">Cerrar sesión de administrador</button>
     <div class="panel"><p class="eyebrow">CONTROL DEL EVENTO</p><h1>Panel del organizador</h1><p class="muted">Crea y modifica preguntas, publica desafíos y revisa evidencias.</p></div>
+    <section class="panel"><h2>Estado del contenido</h2><p id="contentSummary" class="muted"></p><button id="refreshAdmin" class="secondary">Actualizar panel</button><p id="adminStatus" class="msg" role="status"></p></section>
     <div class="adminGrid">
       <section class="panel"><h2>Crear / editar pregunta</h2>
         <input id="qId" type="hidden">
+        <label class="check"><input id="qActive" type="checkbox" checked>Pregunta activa</label>
         <label>Juego<select id="qGame"><option value="trivia">Trivia</option><option value="tf">Verdadero o falso</option></select></label>
         <label>Dificultad<select id="qLevel"><option value="1">Básica</option><option value="2">Intermedia</option><option value="3">Experta</option></select></label>
         <label>Pregunta<textarea id="qText" rows="3" placeholder="Escribe la pregunta…"></textarea></label>
@@ -64,18 +66,22 @@
           <label>Alternativa C<input id="optC"></label><label>Alternativa D<input id="optD"></label>
         </div>
         <label>Respuesta correcta<select id="qCorrect"><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option></select></label>
-        <label>Puntos<input id="qPoints" type="number" min="1" value="10"></label>
+        <label>Puntos<input id="qPoints" type="number" min="1" max="1000" step="1" value="10"></label>
         <button id="saveQuestion">Guardar pregunta</button><button id="clearQuestion" class="secondary">Limpiar</button><p id="qMsg" class="msg"></p>
       </section>
-      <section class="panel"><h2>Crear desafío de objeto</h2>
+      <section class="panel"><h2>Crear / editar desafío de objeto</h2>
+        <input id="challengeId" type="hidden">
+        <label class="check"><input id="challengeActive" type="checkbox" checked>Desafío activo</label>
         <label>Desafío<textarea id="challengeText" rows="3" placeholder="Ej. ¿Quién tiene una moneda extranjera?"></textarea></label>
-        <label>Puntos<input id="challengePoints" type="number" min="1" value="15"></label>
-        <button id="saveChallenge">Publicar desafío</button><p id="challengeMsg" class="msg"></p>
-        <h3>Preguntas existentes</h3><div id="questionList"></div>
+        <label>Puntos<input id="challengePoints" type="number" min="1" max="1000" step="1" value="15"></label>
+        <button id="saveChallenge">Guardar desafío</button><button id="clearChallenge" class="secondary">Limpiar</button><p id="challengeMsg" class="msg"></p>
+        <h3>Desafíos existentes</h3><div id="challengeList"></div>
       </section>
     </div>
+    <section class="panel"><h2>Preguntas existentes</h2><p class="muted">Puedes desactivar contenido conservando las respuestas y los puntajes registrados.</p><div id="questionList"></div></section>
     <section class="panel"><h2>Evidencias pendientes</h2><div id="pending"></div></section>
     <section class="panel"><h2>Participantes y puntajes</h2><div id="adminRanking"></div></section>
+    <section class="panel"><h2>Acceso para los invitados</h2><p>Comparte este QR o el enlace para entrar desde el teléfono.</p><img class="entryQr" src="entry-qr.svg" alt="Código QR para entrar a Pilots Challenge"><p><a href="entry-qr.svg" download="pilots-challenge-qr.svg">Descargar QR para imprimir</a></p><a href="https://gannicus2026.github.io/Pilots-Challenge/">https://gannicus2026.github.io/Pilots-Challenge/</a></section>
   </section>
 </main>
 <footer><button id="adminLink" class="linkbtn">Acceso organizador</button><span> · Pilots Challenge</span></footer>

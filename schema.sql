@@ -1,3 +1,7 @@
+-- ARCHIVO HISTÓRICO: NO EJECUTAR SOBRE EL PROYECTO EXISTENTE.
+-- La instalación actual y sus ajustes se mantienen mediante las migraciones de Supabase.
+-- Consulta README.md y migration_event_configuration.sql.
+
 -- PILOTS CHALLENGE — esquema inicial para Supabase
 -- Ejecutar completo en Supabase > SQL Editor.
 create extension if not exists pgcrypto;
