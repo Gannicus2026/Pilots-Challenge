@@ -208,3 +208,11 @@ test('resume restores a selected answer even if pause caught the submit button b
  assert.equal(button.disabled,true);a.run('eventPaused=false;applyEventLock()');assert.equal(button.disabled,false);
  a.run('selectedAnswer=null;eventPaused=true;applyEventLock();eventPaused=false;applyEventLock()');assert.equal(button.disabled,true);
 });
+
+test('occupied nickname shows a useful message and allows another name in the same session',async()=>{
+ let calls=0,anonymousCalls=0;
+ const a=app({session:{user:{id:'player',is_anonymous:true}},rpc:async(name,args)=>{assert.equal(name,'register_participant');calls++;if(calls===1){assert.equal(args.p_nickname,'Captain Pilot');return{error:{code:'23505',message:'NICKNAME_TAKEN: Ese pseudónimo ya está ocupado.'}}}assert.equal(args.p_nickname,'Captain Pilot 2');return{}},auth:{signInAnonymously:async()=>{anonymousCalls++;return{}}}});
+ a.run('loadParticipant=async()=>{}');a.element('nickname').value='  Captain   Pilot  ';a.element('role').value='FO';
+ await a.element('join').onclick();assert.match(a.element('setupMsg').textContent,/ocupado/);assert.equal(a.element('join').disabled,false);
+ a.element('nickname').value='Captain Pilot 2';await a.element('join').onclick();assert.equal(calls,2);assert.equal(anonymousCalls,0);assert.equal(a.element('setupMsg').textContent,'');
+});
