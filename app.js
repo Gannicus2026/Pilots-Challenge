@@ -207,7 +207,7 @@ async function refreshScore(){
 }
 $("join").onclick=()=>busy($("join"),async()=>{
   if(!needConfig())return;
-  const nickname=$("nickname").value.trim(),role=$("role").value;
+  const nickname=$("nickname").value.trim().replace(/\s+/g," "),role=$("role").value;
   if(nickname.length<2 || nickname.length>24 || !["FO","CT"].includes(role)){msg("setupMsg","Usa un pseudónimo de 2 a 24 caracteres y elige FO o CT.");return}
   msg("setupMsg","Ingresando…");
   try{
@@ -218,7 +218,11 @@ $("join").onclick=()=>busy($("join"),async()=>{
     else {const {data,error}=await db.auth.signInAnonymously();if(error)throw error;user=data.user}
     await loadParticipant();if(participant)return;
     const {error}=await db.rpc("register_participant",{p_nickname:nickname,p_role:role});
-    if(error){msg("setupMsg","No se pudo completar el registro. Intenta nuevamente.");return}
+    if(error){
+      const occupied=error.code==="23505"&&/NICKNAME_TAKEN|participants_nickname_unique/.test([error.message,error.details].join(" "));
+      msg("setupMsg",occupied?"Ese pseudónimo ya está ocupado. Elige otro para que podamos identificarte en el ranking.":"No se pudo completar el registro. Intenta nuevamente.");
+      if(occupied)$("nickname").focus();return;
+    }
     await loadParticipant();msg("setupMsg","");
   }catch{msg("setupMsg",connectionMessage)}
 });
